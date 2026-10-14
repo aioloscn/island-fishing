@@ -1,6 +1,7 @@
 import { Mesh, BufferGeometry, Float32BufferAttribute, Matrix4, Quaternion, Vector3, Vector4, MathUtils } from '../engine/index.js';
 import { prepare, mergePrepared, cylinder, torus, sphere, rod, mat4, lathe, roundedBox, tube } from '../world/boat/GeoKit.js';
 import { createPropMaterial, createLineMaterial, PAT } from './GameMaterials.js';
+import { GPU } from '../engine/gpu/GPU.js';
 
 // The fishing rod in the player's hands, its line and the bobber.
 //
@@ -62,6 +63,8 @@ const _m = new Matrix4(), _q = new Quaternion(), _v = new Vector3(), _w = new Ve
 const _tipOld = new Vector3(); // last frame's tip: its own vector (the scratch vectors are reused during update)
 const _up = new Vector3( 0, 1, 0 );
 const _h = new Vector3();
+const _grip = new Vector3(), _goal = new Vector3();
+const _baseQ = new Quaternion(), _landingQ = new Quaternion();
 
 export const POSES = {
 	stowed: { elev: - 0.9, side: 0.35, hand: [ 0.3, - 0.62, - 0.25 ] },
@@ -71,7 +74,7 @@ export const POSES = {
 	follow: { elev: 0.24, side: 0.02, hand: [ 0.17, - 0.1, - 0.56 ] }, // follow-through: the rod points along the cast
 	floating: { elev: 0.4, side: 0.18, hand: [ 0.15, - 0.06, - 0.46 ] },
 	fighting: { elev: 0.9, side: 0.12, hand: [ 0.14, - 0.03, - 0.43 ] },
-	landing: { elev: 0.85, side: 0.3, hand: [ 0.16, - 0.08, - 0.46 ] }, // rod up, the fish swinging in view
+	landing: { elev: 1.2, side: 0.9, hand: [ 0.16, - 0.08, - 0.46 ] }, // 抬高并侧持鱼竿，后移对齐时握把仍留在镜头前方
 };
 
 export class FishingRod {
@@ -122,7 +125,7 @@ export class FishingRod {
 			clearcoat: true,
 			uniforms: {
 				rodBend: [ 'vec4f', new Vector4() ], // xyz bend direction (rod space), w bend
-				rodShape: [ 'vec4f', new Vector4( 3, 0, 0, 0 ) ], // x: bend exponent (fast action)
+				rodShape: [ 'vec4f', new Vector4( 3, 1, 0, 0 ) ], // x: bend exponent, y: landing blank extension
 				reelAnim: [ 'vec4f', new Vector4() ], // rotor angle, bail open 0..1, crank angle, spool angle
 				reelAnim2: [ 'vec4f', new Vector4( 0, 1, 0, 0 ) ], // spool oscillation (m), line fill
 			},
@@ -181,6 +184,12 @@ export class FishingRod {
 		let drop = 0.5 * lat * lat / ( max( P.y - ${ f( BLANK_START ) }, 0.0 ) + 0.06 );
 		P = P + mat.rodBend.xyz * lat - vec3f( 0.0, drop, 0.0 );
 		Nn = normalize( Nn - vec3f( 0.0, slope * dot( Nn, mat.rodBend.xyz ), 0.0 ) );
+		// 展示大鱼时只延展竿坯；握把和卷线器保持原尺寸与握持位置。
+		let extension = max( 1.0, mat.rodShape.y );
+		if ( P.y > ${ f( BLANK_START ) } ) {
+			P.y = ${ f( BLANK_START ) } + ( P.y - ${ f( BLANK_START ) } ) * extension;
+			Nn = normalize( vec3f( Nn.x, Nn.y / extension, Nn.z ) );
+		}
 		v.position = P;
 		v.normal = Nn;
 	}
@@ -206,6 +215,7 @@ export class FishingRod {
 		this.lineMesh.frustumCulled = false;
 		this.lineMesh.castShadow = false;
 		this.lineMesh.visible = false;
+		this._lineMotionFrame = - 1;
 
 		scene.add( this.rodMesh, this.bobberMesh, this.lineMesh );
 
@@ -274,10 +284,11 @@ export class FishingRod {
 	}
 
 	// fish landed: swing it up out of the water on a short line (the game hangs the fish on the end)
-	land() {
+	land( length = 0.5 ) {
 
 		this.setState( 'landing' );
 		this._landFrom = this.bobber.clone();
+		this._landLength = length;
 
 	}
 
@@ -288,9 +299,56 @@ export class FishingRod {
 
 	}
 
+	// 挂线点保持取景位置，握把仍在手边；竿尖位于挂线点正上方，避免整根竿漂到远处。
+	alignLandingRod( target, ease, length, bendPower ) {
+
+		bendAt( ROD_L, this.bend, bendPower, _b );
+		const lat = _b.lat, drop = _b.drop;
+		_grip.copy( this.pose.hand ).applyMatrix4( this.camera.matrixWorld );
+		_goal.copy( target );
+		_goal.y += Math.max( 0.28, length * 0.6 );
+		const dx = _goal.x - _grip.x, dz = _goal.z - _grip.z;
+		const span = ROD_L - drop - SEAT_Y;
+		// 小鱼不能把整根鱼竿缩短：竿尖可移到视野上方，鱼线仍然垂直向下。
+		_goal.y = Math.max( _goal.y, _grip.y + Math.sqrt( Math.max( 0, span * span + lat * lat - dx * dx - dz * dz ) ) );
+		_y.subVectors( _goal, _grip );
+		const distance = _y.length();
+		_y.normalize();
+		_z.copy( _up ).addScaledVector( _y, - _y.y ).normalize();
+		_x.crossVectors( _y, _z ).normalize();
+		_m.makeBasis( _x, _y, _z );
+		const along = Math.sqrt( Math.max( 1e-6, distance * distance - lat * lat ) );
+		const extension = Math.max( 1, ( SEAT_Y + along - BLANK_START ) / ( ROD_L - drop - BLANK_START ) );
+		// 补偿竿坯受力弯曲后的端点，不用未弯曲的直竿轴线对齐鱼线。
+		_q.setFromRotationMatrix( _m ).multiply( _landingQ.setFromAxisAngle( _x.set( 1, 0, 0 ), Math.atan2( lat, along ) ) );
+		_baseQ.setFromRotationMatrix( this.rodMesh.matrix ).slerp( _q, ease );
+		_m.makeRotationFromQuaternion( _baseQ );
+		_y.set( 0, 1, 0 ).applyQuaternion( _baseQ );
+		_m.setPosition( _grip.addScaledVector( _y, - SEAT_Y ) );
+		this.rodMesh.matrix.copy( _m );
+		this.bendDir.lerp( _z.set( 0, 0, - 1 ), ease ).normalize();
+		const scale = 1 + ( extension - 1 ) * ease;
+		this.rodMat.uniforms.rodShape.value.y = scale;
+		this.rodMat.uniforms.rodBend.value.set( this.bendDir.x, 0, this.bendDir.z, this.bend );
+		this.tip.set( this.bendDir.x * lat, BLANK_START + ( ROD_L - drop - BLANK_START ) * scale, this.bendDir.z * lat ).applyMatrix4( this.rodMesh.matrix );
+
+	}
+
 	// ---- per frame. fight: { distance, tension, surge } while fighting
 	update( dt, { visible, fight = null } ) {
 
+		// Preserve the last rendered curve once per frame, including its visibility.
+		// Multiple simulation updates in one render frame cannot advance this history.
+		const lm = this.lineMat.uniforms;
+		if ( this._lineMotionFrame !== GPU.frame ) {
+
+			lm.prevLineA.value.copy( lm.lineA.value );
+			lm.prevLineB.value.copy( lm.lineB.value );
+			lm.prevLineCtl.value.copy( lm.lineCtl.value );
+			lm.prevLineShow.value = this.lineMesh.visible ? lm.lineShow.value : 0;
+			this._lineMotionFrame = GPU.frame;
+
+		}
 		this.t += dt;
 		const cam = this.camera;
 		const tipOld = _tipOld.copy( this.tip );
@@ -364,7 +422,13 @@ export class FishingRod {
 		this.load += ( loadT - this.load ) * ( 1 - Math.exp( - dt * 6 ) );
 		// bend direction: toward the bobber (rod space, across the blank) when the line is out,
 		// otherwise down toward the reel side (negative bend = loaded back up)
-		if ( this.lineInWater && this.state !== 'flying' ) {
+		if ( this.state === 'landing' ) {
+
+			// 悬挂鱼获的拉力沿重力方向；竿身随后平移对齐挂线点，不能再朝旧浮漂位置弯曲。
+			_v.set( 0, - 1, 0 ).transformDirection( _m.copy( this.rodMesh.matrix ).invert() ).setY( 0 );
+			if ( _v.lengthSq() > 1e-6 ) this.bendDir.lerp( _v.normalize(), 1 - Math.exp( - dt * 10 ) ).normalize();
+
+		} else if ( this.lineInWater && this.state !== 'flying' ) {
 
 			_v.copy( this.bobber ).applyMatrix4( _m.copy( this.rodMesh.matrix ).invert() ).setY( 0 );
 			if ( _v.lengthSq() > 1e-6 ) this.bendDir.lerp( _v.normalize(), 1 - Math.exp( - dt * 10 ) ).normalize();
@@ -372,7 +436,7 @@ export class FishingRod {
 		} else this.bendDir.lerp( _w.set( 0, 0, - 1 ), 1 - Math.exp( - dt * 10 ) ).normalize();
 		const P = BEND_P( this.load );
 		this.rodMat.uniforms.rodBend.value.set( this.bendDir.x, 0, this.bendDir.z, this.bend );
-		this.rodMat.uniforms.rodShape.value.set( P, 0, 0, 0 );
+		this.rodMat.uniforms.rodShape.value.set( P, 1, 0, 0 );
 
 		// tip in world space (same curve as the shader)
 		bendAt( ROD_L, this.bend, P, _b );
@@ -419,7 +483,7 @@ export class FishingRod {
 			const v0 = 7 + 13 * this.power * ( this.castM / 22 ) ** 0.5;
 			// toward where you aim: the heading runs from the tip (off to the side of the view) to the
 			// point on the water straight ahead at the cast's reach, so the line leaves along the rod
-			// toward the crosshair instead of parallel to the view from the tip
+			// toward the view centre instead of parallel to the view from the tip
 			const d = cam.getWorldDirection( _v );
 			const hl = Math.max( Math.hypot( d.x, d.z ), 1e-3 );
 			const reach = this.castM * ( 0.35 + 0.65 * this.power );
@@ -494,14 +558,15 @@ export class FishingRod {
 
 		} else if ( this.state === 'landing' ) {
 
-			// lifted out and swung in to hang in front of you, a little right of centre and below eye level
+			// 按真实鱼长调整展示距离，中间为鱼留出空间，避免大鱼遮住上方名称或下方数据。
 			const k = Math.min( 1, this.t / 0.6 );
 			const e = k * k * ( 3 - 2 * k );
-			const fwd = cam.getWorldDirection( _x ).setY( 0 ).normalize();
-			_v.copy( cam.position ).addScaledVector( fwd, 1.25 ).add( _h.set( - fwd.z, 0, fwd.x ).multiplyScalar( 0.15 ) );
-			_v.y += 0.12;
+			const length = this._landLength || 0.5;
+			const distance = Math.max( 0.55, length / ( 2 * Math.tan( cam.fov * Math.PI / 360 ) * 0.46 ) );
+			_v.copy( cam.position ).addScaledVector( cam.getWorldDirection( _x ), distance ).addScaledVector( _up, length * 0.4 );
 			this.bobber.lerpVectors( this._landFrom || this.bobber, _v, e );
 			this.bobber.y += Math.sin( e * Math.PI ) * 0.8;
+			this.alignLandingRod( _v, e, length, P );
 
 		} else if ( this.state === 'retrieving' ) {
 
@@ -518,10 +583,9 @@ export class FishingRod {
 		// ---- line
 		const out = this.lineInWater;
 		this.lineOut = out ? this.tip.distanceTo( this.bobber ) : 0;
-		const lm = this.lineMat.uniforms;
 		lm.lineA.value.copy( this.tip );
 		lm.lineB.value.copy( this.bobber );
-		const taut = this.state === 'fighting' ? Math.min( 1, ( fight ? fight.tension : 0 ) * 1.5 ) : this.state === 'retrieving' ? 0.6 : 0;
+		const taut = this.state === 'fighting' ? Math.min( 1, ( fight ? fight.tension : 0 ) * 1.5 ) : this.state === 'landing' ? 0.95 : this.state === 'retrieving' ? 0.6 : 0;
 		const sag = this.lineOut * ( this.state === 'flying' ? 0.03 : 0.07 ) * ( 1 - taut ) + 0.02;
 		lm.lineCtl.value.copy( this.tip ).lerp( this.bobber, 0.5 ).y -= sag;
 		// the line near the rod follows the rod's motion a little (whips on the flick)

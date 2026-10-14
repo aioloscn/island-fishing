@@ -1,14 +1,14 @@
 import { FISH, fishValue, fishLengthCm } from './FishTable.js';
 import { defaultUpgrades, gearStats, nextLevel, UPGRADES, FUEL_PRICE } from './Gear.js';
+import { validFishEntry } from './SaveFormat.js';
 
 const SAVE_KEY = 'tidewater.save.v1';
 
 // Everything the player owns: wallet, the fish in the cooler / hold, the fish log and the gear
-// levels. Saved to localStorage (per browser) after every change; storage can be missing or throw
-// (private windows, blocked site data), so every access is guarded and the game runs without it.
+// levels. The game supplies a project-backed storage cache; tests/previews can use memory or null.
 export class GameState {
 
-	constructor( storage = safeStorage() ) {
+	constructor( storage = null ) {
 
 		this.storage = storage;
 		this.money = 0;
@@ -16,6 +16,8 @@ export class GameState {
 		this.log = {}; // species -> { count, bestKg, bestCm }
 		// the last addFish: { species, kg, cm, value, newSpecies, record, prevBestKg, prevBestCm, kept } (the catch card)
 		this.lastCatch = null;
+		this.pendingCatch = null; // caught but awaiting room in the box; separate from its load
+		this.capacityReview = false; // keep the box open until the player resolves an overflow
 		this.upgrades = defaultUpgrades();
 		this.fuel = null; // litres left (null = full tank)
 		this._nextId = 1;
@@ -45,6 +47,18 @@ export class GameState {
 
 	}
 
+	get boxKg() {
+
+		return this.holdKg + ( this.pendingCatch?.kg || 0 );
+
+	}
+
+	get canCloseInventory() {
+
+		return ! this.capacityReview || this.boxKg < this.stats.holdKg - 1e-6;
+
+	}
+
 	// room in the cooler / hold for a fish of `kg`?
 	fits( kg ) {
 
@@ -52,10 +66,12 @@ export class GameState {
 
 	}
 
-	// store a caught fish; returns the entry, or null when the hold is full (it is logged either way).
+	// Store a catch, or retain it as pending with deferOverflow; either path logs it once.
+	// Legacy headless callers may leave deferOverflow off for immediate release on overflow.
 	// A record beats an earlier catch of the species; the first one of a species is a new species.
-	addFish( species, kg, timeOfDay = 12 ) {
+	addFish( species, kg, timeOfDay = 12, deferOverflow = false ) {
 
+		if ( this.capacityReview ) throw new Error( '请先处理超重的鱼获。' );
 		kg = Math.round( kg * 100 ) / 100;
 		const cm = Math.round( fishLengthCm( species, kg ) );
 		const logEntry = this.log[ species ] || ( this.log[ species ] = { count: 0, bestKg: 0 } );
@@ -73,15 +89,22 @@ export class GameState {
 		const value = fishValue( species, kg );
 		const kept = this.fits( kg );
 		this.lastCatch = { species, kg, cm, value, newSpecies, record, prevBestKg, prevBestCm, kept };
+		const f = kept || deferOverflow ? { id: this._nextId ++, species, kg, cm, value, caughtAt: timeOfDay, record } : null;
 		if ( ! kept ) {
 
+			if ( deferOverflow ) {
+
+				this.pendingCatch = f;
+				this.capacityReview = true;
+				this.lastCatch.pending = true;
+
+			}
 			this.save();
 			this.emit();
 			return null;
 
 		}
 
-		const f = { id: this._nextId ++, species, kg, cm, value, caughtAt: timeOfDay, record };
 		this.inventory.push( f );
 		this.save();
 		this.emit();
@@ -107,8 +130,36 @@ export class GameState {
 	release( id ) {
 
 		this.inventory = this.inventory.filter( ( f ) => f.id !== id );
+		if ( this.pendingCatch?.id === id ) {
+
+			this.pendingCatch = null;
+			if ( this.lastCatch?.pending ) this.lastCatch.pending = false;
+
+		}
 		this.save();
 		this.emit();
+
+	}
+
+	// Resolve the decision only after the combined weight is below the current capacity.
+	// The fish keeps its original ID and its journal record, regardless of which fish were released.
+	finishCapacityReview() {
+
+		if ( ! this.canCloseInventory ) return false;
+		if ( ! this.capacityReview ) return true;
+		const fish = this.pendingCatch;
+		this.pendingCatch = null;
+		if ( fish ) this.inventory.push( fish );
+		if ( fish && this.lastCatch?.pending ) {
+
+			this.lastCatch.pending = false;
+			this.lastCatch.kept = true;
+
+		}
+		this.capacityReview = false;
+		this.save();
+		this.emit();
+		return true;
 
 	}
 
@@ -188,7 +239,7 @@ export class GameState {
 
 	toJSON() {
 
-		return { v: 1, money: this.money, inventory: this.inventory, log: this.log, upgrades: this.upgrades, fuel: this.fuel, nextId: this._nextId };
+		return { v: 1, money: this.money, inventory: this.inventory, log: this.log, upgrades: this.upgrades, fuel: this.fuel, nextId: this._nextId, pendingCatch: this.pendingCatch, capacityReview: this.capacityReview };
 
 	}
 
@@ -203,7 +254,11 @@ export class GameState {
 		for ( const [ k, v ] of Object.entries( this.log ) ) if ( FISH[ k ] && v && v.bestKg > 0 && ! Number.isFinite( v.bestCm ) ) v.bestCm = Math.round( fishLengthCm( k, v.bestKg ) );
 		this.upgrades = { ...defaultUpgrades(), ...( d.upgrades || {} ) };
 		this.fuel = Number.isFinite( d.fuel ) ? d.fuel : null;
-		this._nextId = Math.max( d.nextId | 0, ...this.inventory.map( ( f ) => f.id + 1 ), 1 );
+		const pending = d.pendingCatch;
+		this.pendingCatch = validFishEntry( pending ) && ! this.inventory.some( ( f ) => f.id === pending.id ) ? { ...pending } : null;
+		this.capacityReview = d.capacityReview === true || !! this.pendingCatch;
+		this.lastCatch = null;
+		this._nextId = Math.max( d.nextId | 0, ...this.inventory.map( ( f ) => f.id + 1 ), ( this.pendingCatch?.id || 0 ) + 1, 1 );
 		return true;
 
 	}
@@ -215,7 +270,7 @@ export class GameState {
 
 			this.storage.setItem( SAVE_KEY, JSON.stringify( this.toJSON() ) );
 
-		} catch ( e ) { /* storage full or blocked: keep playing */ }
+		} catch ( e ) { console.error( '[game-save]', e.message ); }
 
 	}
 
@@ -240,24 +295,13 @@ export class GameState {
 		this.money = 0;
 		this.inventory = [];
 		this.log = {};
+		this.pendingCatch = null;
+		this.capacityReview = false;
+		this.lastCatch = null;
 		this.upgrades = defaultUpgrades();
 		this.fuel = null;
 		this.save();
 		this.emit();
-
-	}
-
-}
-
-function safeStorage() {
-
-	try {
-
-		return typeof localStorage !== 'undefined' ? localStorage : null;
-
-	} catch ( e ) {
-
-		return null;
 
 	}
 

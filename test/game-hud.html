@@ -1,14 +1,15 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
 <head>
 	<meta charset="utf-8">
-	<title>Game HUD states</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>钓鱼界面状态预览</title>
 	<style>body { margin: 0; background: linear-gradient(180deg, #6fa7d6 0%, #9cc9e8 45%, #1f8fa3 46%, #0c5f77 100%); height: 100vh; }</style>
 </head>
 <body>
 <script type="module">
 // Dev page: the fishing game's HUD in every state, over a flat sky / sea backdrop.
-// ?view=fight | inv | stand | shop | cast | bite | catch | record | newspecies | full
+// ?view=fight | inv | journal | journalempty | journalall | stand | shop | cast | bite | catch | record | newspecies | full
 import '../src/ui/ui.css';
 import { GameHUD } from '../src/game/GameHUD.js';
 import { GameState } from '../src/game/GameState.js';
@@ -30,18 +31,59 @@ state.addFish( 'yellowtail', 1.31, 9 );
 state.addFish( 'grunt', 0.84, 9.5 );
 state.addFish( 'jack', 4.6, 10 );
 state.addFish( 'barracuda', 3.2, 11 );
-const game = { state, sellAll() { state.sell(); }, sell( ids ) { state.sell( ids ); } };
+const game = { state, sellAll() { state.sell(); }, sell( ids ) { state.sell( ids ); },
+	releaseFish( id ) { state.release( id ); },
+	finishCapacityReview() { return state.finishCapacityReview(); },
+};
 const h = new GameHUD( ui, game );
+window.__gameHUD = h;
+window.__gameState = state;
 const fight = { tension: 0.62, band: [ 0.35, 0.8 ], stamina: 0.55, distance: 11.4, surge: 0.1 };
-h.update( { fuel: { litres: 23, tank: 40 }, sonar: { depth: 12.4, fish: 0.5 }, fight: view === 'fight' ? fight : null, casting: view === 'cast', power: 0.7, bite: view === 'bite', aiming: true } );
+h.update( { fuel: { litres: 23, tank: 40 }, sonar: { depth: 12.4, fish: 0.5 }, fight: view === 'fight' ? fight : null, casting: view === 'cast', power: 0.7, bite: view === 'bite' } );
 if ( view === 'inv' ) h.toggleInventory( true );
-if ( view === 'shop' ) { state.buy( 'reel' ); h.openStand( { kind: 'shop', name: 'Marta · Chandlery', greeting: 'Line, reels, a bigger hold, diesel. What do you need?' } ); }
-if ( view === 'stand' ) h.openStand( { name: 'Joe · Fish buyer', greeting: 'Let\'s see what you caught. Fair prices, cash.' } );
-if ( view === 'fight' ) ui.toast( 'Fish on!' );
+if ( view === 'overflow' || view === 'oversized' ) {
+
+	state.reset();
+	state.addFish( 'grouper', 23, 12 );
+	state.addFish( 'jack', 5, 12 );
+	state.addFish( 'grunt', 1, 12 );
+	state.addFish( 'silverside', 1, 12 );
+	state.addFish( 'tarpon', view === 'oversized' ? 38.5 : 6, 12, true );
+	h.toggleInventory( true );
+
+}
+if ( view.startsWith( 'journal' ) ) {
+
+	if ( view === 'journalempty' ) state.reset();
+	if ( view === 'journalall' ) {
+
+		const { FISH } = await import( '../src/game/FishTable.js' );
+		for ( const [ id, f ] of Object.entries( FISH ) ) if ( ! state.log[ id ] ) state.addFish( id, ( f.kg[ 0 ] + f.kg[ 1 ] ) / 2 );
+
+	}
+	const { GPU, Texture } = await import( '../src/engine/webgpu.js' );
+	await GPU.init( { headless: true } );
+	// The standalone studio declares the shadow binding even with shadows disabled.
+	const { setShadowMap } = await import( '../src/engine/render/wgsl/lighting.js' );
+	setShadowMap( new Texture( { label: 'hud-preview.shadow', width: 1, height: 1, dimension: '2d-array', format: 'depth32float', usage: [ 'sample' ] } ) );
+	h.openJournal();
+	const frame = () => {
+
+		GPU.beginFrame();
+		if ( h.portrait ) h.portrait.update( 1 / 60 );
+		GPU.submit();
+		requestAnimationFrame( frame );
+
+	};
+	requestAnimationFrame( frame );
+
+}
+if ( view === 'shop' ) { state.buy( 'reel' ); h.openStand( { kind: 'shop', name: '玛尔塔 · 船具店', greeting: '鱼线、卷线器、大鱼舱、柴油。需要些什么？' } ); }
+if ( view === 'stand' ) h.openStand( { name: '乔 · 鱼获收购', greeting: '让我看看你的鱼获。价格公道，现金结算。' } );
+if ( view === 'fight' ) ui.toast( '鱼上钩了！' );
 if ( [ 'catch', 'record', 'newspecies', 'full' ].includes( view ) ) {
 
-	// the landed-fish backdrop the card sits beside (in game: the real fish on the line)
-	document.body.style.background = 'radial-gradient(40% 50% at 62% 50%, #3d6f7a 0%, transparent 70%), linear-gradient(180deg, #6fa7d6 0%, #9cc9e8 45%, #1f8fa3 46%, #0c5f77 100%)';
+	// 此页只预览透明信息层；挂在线上挣扎的鱼由主游戏的真实场景渲染。
 	if ( view === 'catch' ) state.addFish( 'yellowtail', 0.92, 9 );
 	if ( view === 'record' ) state.addFish( 'jack', 6.35, 9 );
 	if ( view === 'newspecies' ) state.addFish( 'mahi', 11.4, 12 );

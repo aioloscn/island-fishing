@@ -31,7 +31,7 @@ export const DEPTH_FORMAT = 'depth32float';
 //   4. water + transparent layers -> sceneRT on top. Velocity blends premultiplied there: opaque
 //      outputs overwrite it, blended effects write ( v * a, 0, a ), glass writes 0.
 // sceneRT textures: [ 0 ] color, [ 1 ] velocity (uv-space motion cur - prev in xy), [ 2 ] water mask
-// (r = the visible surface is seen from below, g = a water surface is the visible surface).
+// (r = underwater view, g = visible water surface, b = temporal reactivity for animated foreground).
 export class SceneRenderer {
 
 	constructor( meshRenderer, scene, camera ) {

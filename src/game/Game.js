@@ -7,14 +7,15 @@ import { GameState } from './GameState.js';
 import { FishingRod } from './FishingRod.js';
 import { FishStand } from './FishStand.js';
 import { Chandlery } from './Chandlery.js';
-import { CatchDisplay } from './CatchDisplay.js';
+import { CatchDisplay, fishLength } from './CatchDisplay.js';
 import { UPGRADES, fuelBurn } from './Gear.js';
 import { GameHUD } from './GameHUD.js';
 import { Minimap } from './Minimap.js';
 import { Guide } from './Guide.js';
 
-// how long the catch card stays up unless dismissed (ms)
-const CATCH_CARD_MS = 9000;
+const MIN_FISHING_UP = Math.cos( Math.PI / 3 ); // beyond 60 degrees the deck is unsafe for fishing
+const _boatUp = new Vector3();
+const BIG_FISH_TEST_CATCH = Object.freeze( { species: 'tarpon', kg: 35 } );
 
 // The fishing game on top of the world:
 //   R          take out / put away the rod (on foot, on the pier, on the boat's deck)
@@ -28,7 +29,7 @@ export class Game {
 	constructor( app ) {
 
 		this.app = app;
-		this.state = new GameState();
+		this.state = new GameState( app.gameStorage );
 		this.state.load();
 		this.rod = new FishingRod( { scene: app.scene, camera: app.camera, query: app.query, terrain: app.terrainData, audio: app.audio } );
 		this.rod.onLand = ( where ) => this.onBobberLanded( where );
@@ -48,6 +49,7 @@ export class Game {
 		this.hud = null;
 		this.fight = null; // CatchMinigame while a fish is on
 		this.bite = null; // { phase: 'wait' | 'nibble' | 'take', t, nibbles, species, kg }
+		this.bigFishTest = false; // session-only, hidden B shortcut; keep the actual fight/gear rules
 		this._lmb = false;
 		this._rmb = false;
 		this._hookedSpecies = null;
@@ -55,6 +57,12 @@ export class Game {
 		this._tmp = new Vector3();
 		this.applyGear();
 		this.state.onChange( () => this.applyGear() );
+		if ( typeof window !== 'undefined' ) {
+
+			window.addEventListener( 'pagehide', () => this.state.save() );
+			document.addEventListener( 'visibilitychange', () => { if ( document.hidden ) this.state.save(); } );
+
+		}
 
 	}
 
@@ -116,7 +124,7 @@ export class Game {
 		if ( l > 0 ) {
 
 			this._fuelOut = false;
-			this.toast( `Filled up · ${ l.toFixed( 0 ) } L` );
+			this.toast( `已加油 · ${ l.toFixed( 0 ) } 升` );
 
 		}
 
@@ -134,7 +142,17 @@ export class Game {
 	get canFish() {
 
 		const app = this.app, p = app.player;
-		return ! app.freeCam && ( p.mode === 'walk' || p.mode === 'deck' ) && ! ( app.ui && app.ui.ui && app.ui.ui._photo );
+		if ( app.freeCam || ( p.mode !== 'walk' && p.mode !== 'deck' ) || app.ui?.ui?._photo ) return false;
+		if ( p.mode === 'deck' ) {
+
+			// Deck movement stays attached to the boat even when it overturns. Check the hull's
+			// actual up direction, rather than the player's partly stabilized camera orientation.
+			const orientation = app.boatCtl?.quaternion;
+			if ( orientation && _boatUp.set( 0, 1, 0 ).applyQuaternion( orientation ).y < MIN_FISHING_UP ) return false;
+			if ( app.camera.position.y < ( app.cameraWaterHeight ?? 0 ) - 0.1 ) return false;
+
+		}
+		return true;
 
 	}
 
@@ -143,6 +161,7 @@ export class Game {
 
 		const app = this.app, p = app.player, inp = app.input, rod = this.rod;
 		this._cardDismissed = false;
+		if ( inp.hit( 'KeyB' ) ) this.bigFishTest = ! this.bigFishTest;
 		if ( ! this.hud && app.ui && app.ui.ui && typeof document !== 'undefined' && document.head ) {
 
 			const ui = app.ui.ui;
@@ -151,31 +170,38 @@ export class Game {
 			this.minimap = new Minimap( ui.hud || ui.root, this );
 			this.guide = new Guide( ui, this, this.minimap );
 			ui.onReplayGuide = () => this.guide.replay();
+			if ( this.state.capacityReview ) this.hud.toggleInventory( true );
 
 		}
 
 		const can = this.canFish;
-		if ( inp.hit( 'KeyR' ) && can && ! this.fight ) {
+		if ( inp.hit( 'KeyR' ) && can && ! this.fight && ! this.landing && ! this.state.capacityReview ) {
 
 			rod.equip( ! rod.equipped );
 			if ( ! rod.equipped ) this.cancelLine();
-			this.toast( rod.equipped ? 'Rod out · hold left mouse to cast' : 'Rod away', 1600 );
+			this.toast( rod.equipped ? '已拿出鱼竿 · 按住左键蓄力抛竿' : '已收起鱼竿', 1600 );
 
 		}
 
 		if ( ! can && rod.equipped ) {
 
-			// swimming, driving, free camera: the line comes in and the rod goes away
+			if ( p.mode === 'deck' && ! app.freeCam && ! app.ui?.ui?._photo ) this.toast( '船体严重倾斜或已入水，已停止钓鱼', 3500 );
+			// Losing a safe fishing position cancels the fight before it can award a catch.
 			this.cancelLine( true );
 			rod.equip( false );
 
 		}
 
-		if ( this.hud && ( inp.hit( 'KeyI' ) || inp.hit( 'Tab' ) ) ) this.hud.toggleInventory();
+		if ( this.hud && ( ! this.landing || this.state.capacityReview ) && ( inp.hit( 'KeyI' ) || inp.hit( 'Tab' ) ) ) this.hud.toggleInventory();
 		if ( this.hud && inp.hit( 'Escape' ) ) {
 
-			this.hud.toggleInventory( false );
-			this.hud.closeStand();
+			if ( this.hud.journalOpen ) this.hud.closeJournal( true );
+			else {
+
+				this.hud.toggleInventory( false );
+				this.hud.closeStand();
+
+			}
 
 		}
 
@@ -184,9 +210,9 @@ export class Game {
 		const lDown = lmb && ! this._lmb, lUp = ! lmb && this._lmb, rDown = rmb && ! this._rmb;
 		this._lmb = lmb;
 		this._rmb = rmb;
-		const panelOpen = this.hud && ( this.hud.invOpen || this.hud.standOpen );
+		const panelOpen = this.hud && ( this.hud.invOpen || this.hud.standOpen || this.hud.journalOpen );
 
-		if ( rod.equipped && ! panelOpen ) {
+		if ( rod.equipped && ! panelOpen && ! this.state.capacityReview && ! this._cardDismissed ) {
 
 			if ( rod.state === 'idle' && lDown ) rod.startWindup();
 			else if ( rod.state === 'windup' && lUp ) rod.release();
@@ -210,29 +236,25 @@ export class Game {
 		if ( this.fight ) this.updateFight( dt, lmb && ! panelOpen );
 
 		rod.update( dt, { visible: can, fight: this.fight } );
-		// the landed fish hangs on the end of the line, turned to face you, then goes in the cooler. With
-		// the HUD the catch card comes up once the fish has swung in, and the fish stays (slowly turning)
-		// until the card is dismissed (click, E, Esc) or times out.
+		// 鱼获信息只覆盖文字，鱼始终挂在场景中的鱼线上；收线时按住的鼠标不能立即收起鱼获。
 		const L = this.landing;
 		if ( L && rod.state === 'landing' && can ) {
 
 			const c = app.camera.position, m = rod.bobber;
 			let yaw = Math.atan2( c.x - m.x, c.z - m.z );
-			if ( L.card ) {
+			if ( L.card && ! this.state.capacityReview ) {
 
-				if ( ! L.shown && rod.t > 0.3 ) {
+				if ( ! L.shown && rod.t >= 0.6 ) {
 
 					L.shown = true;
-					this.hud.showCatch( L.card, CATCH_CARD_MS );
+					this.hud.showCatch( L.card );
 
-				}
-
-				if ( L.shown ) {
+				} else if ( L.shown ) {
 
 					// a slow turn so both flanks show
 					L.cardT += dt;
 					yaw += Math.sin( L.cardT * 0.7 ) * 0.55;
-					if ( lDown || inp.hit( 'KeyE' ) || inp.hit( 'Escape' ) || L.cardT > CATCH_CARD_MS / 1000 ) {
+					if ( lDown || inp.hit( 'KeyE' ) || inp.hit( 'Escape' ) ) {
 
 						this._cardDismissed = true; // this frame's E / click belong to the card
 						this.endLanding();
@@ -245,10 +267,7 @@ export class Game {
 
 			if ( this.landing ) {
 
-				// with the HUD the fish is shown on the full-screen catch card (studio portrait), not on
-				// the line; without it (headless) it hangs on the line for a moment
-				if ( ! L.card ) this.display.show( L.species, L.kg, m, yaw, dt );
-				else if ( this.display.shown ) this.display.hide();
+				this.display.show( L.species, L.kg, m, yaw, dt );
 				if ( ! L.card && rod.t > 2.8 ) this.endLanding();
 
 			}
@@ -267,7 +286,7 @@ export class Game {
 		if ( ! p.prompt && can ) p.prompt = this.prompt();
 
 		const aboard = p.mode === 'boat' || p.mode === 'deck';
-		// the catch card's live fish portrait (or one queued thumbnail)
+		// 图鉴缩略图在独立的摄影棚中生成，不覆盖场景中的鱼获。
 		if ( this.hud && this.hud.portrait ) this.hud.portrait.update( dt );
 		if ( this.hud ) this.hud.update( {
 			fuel: aboard ? { litres: this.state.fuelL, tank: this.state.stats.fuelL } : null,
@@ -276,7 +295,6 @@ export class Game {
 			casting: rod.state === 'windup',
 			power: rod.power,
 			bite: this.bite && this.bite.phase === 'take',
-			aiming: rod.equipped,
 		} );
 		if ( this.minimap ) this.minimap.update( dt );
 		if ( this.guide ) this.guide.update( dt );
@@ -290,24 +308,24 @@ export class Game {
 
 			// by the water (boat deck, pier, the wet beach, wading): suggest the rod
 			const byWater = p.mode === 'deck' || ( p.mode === 'walk' && [ 'wood', 'wetsand', 'water' ].includes( p.surface ) );
-			return byWater ? { key: 'R', text: 'Take out the rod' } : null;
+			return byWater ? { key: 'R', text: '拿出鱼竿' } : null;
 
 		}
 
 		const b = this.bite;
 		switch ( rod.state ) {
 
-			case 'idle': return { key: 'LMB', text: 'Hold to wind up, release to cast   ·   R  put the rod away' };
-			case 'windup': return { key: 'LMB', text: 'Release to cast (hold longer to cast farther)' };
+			case 'idle': return { key: '左键', text: '按住蓄力，松开抛竿   ·   R 收起鱼竿' };
+			case 'windup': return { key: '左键', text: '松开抛竿（蓄力越久，抛得越远）' };
 			case 'flying': return null;
 			case 'floating':
-				if ( b && b.phase === 'take' ) return { key: 'LMB', text: 'Strike now!' };
-				if ( b && b.phase === 'nibble' ) return { key: '…', text: 'Something\'s nibbling · wait until the bobber is pulled under' };
-				return { key: 'RMB', text: 'Waiting for a bite · right-click to reel the line in' };
-			case 'retrieving': return { key: 'RMB', text: 'Reeling in' };
+				if ( b && b.phase === 'take' ) return { key: '左键', text: '现在扬竿！' };
+				if ( b && b.phase === 'nibble' ) return { key: '…', text: '鱼在试探 · 等浮漂被拉入水下' };
+				return { key: '右键', text: '等待咬钩 · 右键收回鱼线' };
+			case 'retrieving': return { key: '右键', text: '正在收线' };
 			case 'fighting': return this.fight && this.fight.tension > this.fight.band[ 1 ]
-				? { key: 'LMB', text: 'Too much tension · let go!' }
-				: { key: 'LMB', text: 'Hold to reel · let go when the tension goes red' };
+				? { key: '左键', text: '张力过高 · 快松手！' }
+				: { key: '左键', text: '按住收线 · 张力变红时松手' };
 			case 'landing': return null;
 			default: return null;
 
@@ -322,10 +340,12 @@ export class Game {
 		if ( b.driven ) {
 
 			const left = s.burn( fuelBurn( b.rpm ) * dt );
+			this._fuelSaveT = ( this._fuelSaveT || 0 ) + dt;
+			if ( this._fuelSaveT >= 10 ) { s.save(); this._fuelSaveT = 0; }
 			if ( left <= 0 ) {
 
 				b.throttle = 0;
-				if ( ! this._fuelOut ) this.toast( 'Out of fuel · buy diesel at the chandlery by the boathouse', 4000 );
+				if ( ! this._fuelOut ) this.toast( '燃油耗尽 · 到船屋旁的船具店购买柴油', 4000 );
 				this._fuelOut = true;
 
 			}
@@ -359,8 +379,8 @@ export class Game {
 		if ( p.mode === 'walk' ) for ( const v of this.vendors ) if ( v.inRange( p.position ) ) near = v;
 		for ( const v of this.vendors ) v.talking = !! ( hud && hud.standOpen && hud.vendor === v );
 		if ( hud && hud.standOpen && ( ! near || near !== hud.vendor ) ) hud.closeStand();
-		if ( ! near || this.fight || this._cardDismissed || ( hud && hud.catchOpen ) ) return;
-		if ( ! p.prompt ) p.prompt = { key: 'E', text: hud && hud.standOpen ? 'Leave' : `Talk to ${ near.name.split( ' ·' )[ 0 ] }` };
+		if ( ! near || this.fight || this.state.capacityReview || this._cardDismissed || ( hud && ( hud.catchOpen || hud.journalOpen ) ) ) return;
+		if ( ! p.prompt ) p.prompt = { key: 'E', text: hud && hud.standOpen ? '离开' : `与商贩交谈：${ near.name.split( ' ·' )[ 0 ] }` };
 		if ( inp.hit( 'KeyE' ) ) {
 
 			if ( ! hud ) {
@@ -377,7 +397,7 @@ export class Game {
 	sellAll() {
 
 		const r = this.state.sell();
-		if ( r.count ) this.toast( `Sold ${ r.count } fish for $${ r.total }` );
+		if ( r.count ) this.toast( `卖出 ${ r.count } 条鱼，收入 $${ r.total }` );
 		if ( this.app.audio && this.app.audio.coin ) this.app.audio.coin();
 		return r;
 
@@ -386,7 +406,7 @@ export class Game {
 	sell( ids ) {
 
 		const r = this.state.sell( ids );
-		if ( r.count ) this.toast( `Sold for $${ r.total }` );
+		if ( r.count ) this.toast( `出售收入 $${ r.total }` );
 		return r;
 
 	}
@@ -421,7 +441,7 @@ export class Game {
 
 		if ( where !== 'water' ) {
 
-			this.toast( 'Landed on the sand', 1400 );
+			this.toast( '浮漂落在了沙滩上', 1400 );
 			return;
 
 		}
@@ -446,7 +466,7 @@ export class Game {
 		if ( b.phase === 'wait' ) {
 
 			const h = this.habitat();
-			const species = pickSpecies( h, this.hour );
+			const species = this.bigFishTest ? BIG_FISH_TEST_CATCH.species : pickSpecies( h, this.hour );
 			if ( ! species ) {
 
 				b.t = 8;
@@ -455,7 +475,7 @@ export class Game {
 			}
 
 			b.species = species;
-			b.kg = rollWeight( species );
+			b.kg = this.bigFishTest ? BIG_FISH_TEST_CATCH.kg : rollWeight( species );
 			b.phase = 'nibble';
 			b.nibbles = 1 + Math.floor( Math.random() * 3 );
 			b.t = 0.7 + Math.random() * 0.8;
@@ -477,7 +497,7 @@ export class Game {
 
 		} else if ( b.phase === 'take' ) {
 
-			this.toast( 'It took the bait and ran', 1800 );
+			this.toast( '鱼叼走鱼饵，跑了', 1800 );
 			this.bite = { phase: 'wait', t: biteDelay( this.habitat(), this.hour ) };
 
 		}
@@ -490,7 +510,7 @@ export class Game {
 		if ( ! b || b.phase === 'wait' || b.phase === 'nibble' ) {
 
 			// too early: a nibbling fish isn't hooked yet; it keeps nibbling (a hint, no penalty)
-			if ( b && b.phase === 'nibble' ) this.toast( 'Not yet · wait for it to pull under', 1500 );
+			if ( b && b.phase === 'nibble' ) this.toast( '还没到时候 · 等浮漂被拉入水下', 1500 );
 			return;
 
 		}
@@ -499,7 +519,7 @@ export class Game {
 		this.fight = new CatchMinigame( { species: b.species, kg: b.kg, lineKg: g.lineKg, reelSpeed: g.reelSpeed, distance: Math.max( 3, this.rod.lineOut ) } );
 		this.bite = null;
 		this.rod.hook();
-		this.toast( 'Fish on!', 1200 );
+		this.toast( '鱼上钩了！', 1200 );
 
 	}
 
@@ -517,7 +537,7 @@ export class Game {
 		const name = FISH[ f.species ].name;
 		if ( st === 'caught' ) {
 
-			const entry = this.state.addFish( f.species, f.kg, this.hour );
+			const entry = this.state.addFish( f.species, f.kg, this.hour, !! this.hud );
 			const info = this.state.lastCatch;
 			if ( au && au.fishSplash ) au.fishSplash( this.rod.bobber, 0.8 );
 			if ( au && au.fishFlop ) au.fishFlop();
@@ -525,30 +545,57 @@ export class Game {
 			if ( this.hud ) this.landing = { species: f.species, kg: f.kg, card: info, cardT: 0 };
 			else {
 
-				if ( entry ) this.toast( `${ info.record ? 'New record! ' : '' }${ name } · ${ entry.kg.toFixed( 2 ) } kg · $${ entry.value }`, 3600 );
-				else this.toast( `${ name } · ${ f.kg.toFixed( 1 ) } kg · no room in the ${ this.state.upgrades.hold > 0 ? 'hold' : 'cooler' }, let it go`, 3600 );
+				if ( entry ) this.toast( `${ info.record ? '新纪录！' : '' }${ name } · ${ entry.kg.toFixed( 2 ) } kg · $${ entry.value }`, 3600 );
+				else this.toast( `${ name } · ${ f.kg.toFixed( 1 ) } kg · ${ this.state.upgrades.hold > 0 ? '鱼舱' : '海钓箱' }空间不足，已放生`, 3600 );
 				this.landing = { species: f.species, kg: f.kg };
 
 			}
 
-			this.rod.land();
+			this.rod.land( fishLength( f.species, f.kg ) );
+			if ( this.state.pendingCatch && this.hud ) {
+
+				this.hud.hideCatch();
+				this.hud.toggleInventory( true );
+				this.toast( `${ this.state.upgrades.hold > 0 ? '鱼舱' : '海钓箱' }超重了 · 请放生鱼获，将总重量降到 ${ this.state.stats.holdKg } kg 以下`, 5000 );
+
+			}
 
 		} else if ( st === 'snapped' ) {
 
-			this.toast( 'Snap! The line broke', 2400 );
+			this.toast( '啪！鱼线断了', 2400 );
 			if ( au && au.lineSnap ) au.lineSnap();
 			this.rod.setState( 'idle' );
 
 		} else {
 
-			this.toast( 'It threw the hook', 2000 );
+			this.toast( '鱼脱钩了', 2000 );
 			this.rod.endFight();
 
 		}
 
 	}
 
-	// the landed fish goes in the cooler: card, fish and line away
+	// Each fish can be chosen explicitly, including the catch that caused the overflow.
+	releaseFish( id ) {
+
+		const current = this.state.pendingCatch?.id === id;
+		this.state.release( id );
+		if ( current ) this.endLanding();
+
+	}
+
+	finishCapacityReview() {
+
+		const fish = this.state.pendingCatch;
+		if ( ! this.state.finishCapacityReview() ) return false;
+		this._cardDismissed = true;
+		this.endLanding();
+		if ( fish ) this.toast( `已收存 ${ FISH[ fish.species ].name } · ${ fish.kg.toFixed( 2 ) } kg` );
+		return true;
+
+	}
+
+	// Clear the world presentation after the fish is stored or explicitly released.
 	endLanding() {
 
 		this.landing = null;
@@ -561,7 +608,7 @@ export class Game {
 	// line in at once (mode change)
 	cancelLine( silent = false ) {
 
-		if ( this.fight && ! silent ) this.toast( 'Lost it', 1400 );
+		if ( this.fight && ! silent ) this.toast( '鱼跑了', 1400 );
 		this.fight = null;
 		this.bite = null;
 		if ( this.rod.state !== 'stowed' ) this.rod.setState( this.rod.equipped ? 'idle' : 'stowed' );

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>Loader states (dev)</title>
+	<title>加载画面状态预览（开发）</title>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 	<link rel="stylesheet" href="/src/ui/ui.css" />
 </head>
@@ -24,7 +24,7 @@
 		const ui = new UI();
 		const q = new URLSearchParams( location.search );
 		if ( q.has( 'err' ) ) ui.setLoadingError( q.get( 'err' ) );
-		else ui.setLoading( Number( q.get( 'p' ) || 0 ), q.get( 's' ) || 'Starting WebGPU…', q.has( 'until' ) ? Number( q.get( 'until' ) ) : undefined );
+		else ui.setLoading( Number( q.get( 'p' ) || 0 ), q.get( 's' ) || '正在启动 WebGPU…', q.has( 'until' ) ? Number( q.get( 'until' ) ) : undefined );
 		if ( q.has( 'total' ) ) ui.setLoadingDetail( Number( q.get( 'done' ) ), Number( q.get( 'total' ) ) );
 		if ( q.has( 'hide' ) ) setTimeout( () => ui.hideLoader(), 1500 );
 		// ?probe: report the tips' and the art's computed opacity in the title (for headless checks)

@@ -1,6 +1,7 @@
 import { BufferGeometry, BufferAttribute, Mesh } from '../../engine/index.js';
 import { StorageBuffer } from '../../engine/gpu/Texture.js';
 import { ShaderModule } from '../../engine/gpu/Shader.js';
+import { GPU } from '../../engine/gpu/GPU.js';
 
 // Many different instanced models in a single render object.
 //
@@ -45,13 +46,14 @@ function prefixOf( name ) {
 
 export class ReefBatch {
 
-	constructor( name, kinds, { maxInstances, dynamic = false, fade = false } ) {
+	constructor( name, kinds, { maxInstances, dynamic = false, fade = false, motion = false } ) {
 
 		this.name = name;
 		this.kinds = kinds;
 		const K = kinds.length;
 		this.maxInstances = maxInstances;
 		this.dynamic = dynamic;
+		this.motion = motion;
 		const P = this.prefix = prefixOf( name );
 
 		// ---- merged geometry
@@ -99,6 +101,14 @@ export class ReefBatch {
 		// ---- per-instance data (owner writes this.data, then calls upload())
 		this.data = new Float32Array( maxInstances * 16 );
 		this.instanceBuffer = new StorageBuffer( { label: name + '.instances', count: maxInstances * 4, type: 'vec4f' } );
+		if ( motion ) {
+
+			this.previousData = new Float32Array( this.data.length );
+			this.lastData = new Float32Array( this.data.length );
+			this.previousInstanceBuffer = new StorageBuffer( { label: name + '.previousInstances', count: maxInstances * 4, type: 'vec4f' } );
+			this.motionFrame = - 1;
+
+		}
 		// three-style handle: `batch.dataAttr.needsUpdate = true` uploads the data
 		const self = this;
 		this.dataAttr = { set needsUpdate( v ) { if ( v ) self.upload(); } };
@@ -141,6 +151,12 @@ export class ReefBatch {
 fn ${ P }RecordIndex( kind: u32, instance: u32 ) -> u32 { return ${ P }List[ ${ P }Base[ kind ] + instance ]; }
 fn ${ P }Record( index: u32, k: u32 ) -> vec4f { return ${ P }Instances[ index * 4u + k ]; }
 `;
+		if ( motion ) {
+
+			bindings[ P + 'PreviousInstances' ] = { storage: this.previousInstanceBuffer, access: 'read' };
+			code += `fn ${ P }PreviousRecord( index: u32, k: u32 ) -> vec4f { return ${ P }PreviousInstances[ index * 4u + k ]; }\n`;
+
+		}
 		if ( fade ) {
 
 			this.fadeList = new Uint32Array( cap );
@@ -229,6 +245,23 @@ fn ${ P }FadeEntry( kind: u32, instance: u32 ) -> ${ P }FadeInfo {
 
 	}
 
+	previousRecord( index ) {
+
+		return [ 0, 1, 2, 3 ].map( ( k ) => `${ this.prefix }PreviousRecord( ${ index }, ${ k }u )` );
+
+	}
+
+	// 新出现或瞬移的实例不能产生从停车点跨越整个场景的运动矢量。
+	resetMotion( index ) {
+
+		if ( ! this.motion ) return;
+		const offset = index * 16;
+		const record = this.data.subarray( offset, offset + 16 );
+		this.previousData.set( record, offset );
+		this.lastData.set( record, offset );
+
+	}
+
 	createMesh( material, { castShadow = false, receiveShadow = true } = {} ) {
 
 		const mesh = new Mesh( this.geometry, material );
@@ -253,6 +286,19 @@ fn ${ P }FadeEntry( kind: u32, instance: u32 ) -> ${ P }FadeInfo {
 
 	upload() {
 
+		if ( this.motion ) {
+
+			// 同一帧可能先隐藏旧鱼、再展示新鱼；上一帧姿态只能在帧边界推进一次。
+			if ( this.motionFrame !== GPU.frame ) {
+
+				this.previousData.set( this.motionFrame < 0 ? this.data : this.lastData );
+				this.motionFrame = GPU.frame;
+
+			}
+			this.previousInstanceBuffer.write( this.previousData );
+			this.lastData.set( this.data );
+
+		}
 		this.instanceBuffer.write( this.data );
 
 	}
@@ -402,7 +448,7 @@ fn ${ P }FadeEntry( kind: u32, instance: u32 ) -> ${ P }FadeInfo {
 
 		this.geometry.dispose();
 		if ( this.fadeGeometry ) this.fadeGeometry.dispose();
-		for ( const b of [ this.instanceBuffer, this.listBuffer, this.baseBuffer, this.indirectBuffer, this.fadeListBuffer, this.fadeBaseBuffer, this.fadeIndirectBuffer ] ) if ( b ) b.destroy();
+		for ( const b of [ this.instanceBuffer, this.previousInstanceBuffer, this.listBuffer, this.baseBuffer, this.indirectBuffer, this.fadeListBuffer, this.fadeBaseBuffer, this.fadeIndirectBuffer ] ) if ( b ) b.destroy();
 		if ( this.mesh ) this.mesh.removeFromParent();
 
 	}

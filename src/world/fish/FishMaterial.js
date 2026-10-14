@@ -96,6 +96,36 @@ fn fishRow( pattern: f32, k: i32 ) -> vec4f { return fishSkin.rows[ clamp( i32( 
 fn fishPartOf( d: vec4f ) -> f32 { return floor( d.y + 0.01 ); }
 fn fishJawOf( d: vec4f ) -> f32 { return max( fract( d.y + 0.01 ) - 0.01, 0.0 ) / 0.9; }
 
+struct FishPropWarp { position: vec3f, normal: vec3f };
+fn fishPropWarp( rest: vec3f, normal: vec3f, jawWeight: f32, pose: vec4f, hinge: vec2f ) -> FishPropWarp {
+	var p = rest;
+	var n = normal;
+	// lower jaw: rotates down about the hinge at the corner of the mouth
+	let a = pose.w * jawWeight;
+	let ca = cos( a ); let sa = sin( a );
+	let dy = p.y - hinge.y; let dz = p.z - hinge.x;
+	p.y = hinge.y + dy * ca - dz * sa;
+	p.z = hinge.x + dy * sa + dz * ca;
+	let ny = n.y * ca - n.z * sa; let nz = n.y * sa + n.z * ca;
+	n.y = ny;
+	n.z = nz;
+
+	// body bent along circular arcs about its middle: sideways (curl), then up / down (sag)
+	let k1 = pose.y + select( -1e-4, 1e-4, pose.y >= 0.0 );
+	let t1 = k1 * p.z;
+	let c1 = cos( t1 ); let s1 = sin( t1 ); let h1 = sin( t1 * 0.5 );
+	let x1 = h1 * h1 * 2.0 / k1 + p.x * c1;
+	let z1 = s1 / k1 - p.x * s1;
+	let nx1 = n.x * c1 + n.z * s1; let nz1 = n.z * c1 - n.x * s1;
+	let k2 = pose.z + select( -1e-4, 1e-4, pose.z >= 0.0 );
+	let t2 = k2 * z1;
+	let c2 = cos( t2 ); let s2 = sin( t2 ); let h2 = sin( t2 * 0.5 );
+	let y2 = h2 * h2 * 2.0 / k2 + p.y * c2;
+	let z2 = s2 / k2 - p.y * s2;
+	let ny2 = n.y * c2 + nz1 * s2; let nz2 = nz1 * c2 - n.y * s2;
+	return FishPropWarp( vec3f( x1, y2, z2 ), vec3f( nx1, ny2, nz2 ) );
+}
+
 fn fishHash( p: vec2f ) -> f32 { return fract( sin( dot( p, vec2f( 127.1, 311.7 ) ) ) * 43758.5453 ); }
 
 // value noise 2D (cheap, for blotches and skin variation)
@@ -157,7 +187,7 @@ fn fishEyeCol( r: f32, ang: f32, irisC: vec3f, cloudy: f32 ) -> vec3f {
 const VARYINGS = {
 	vFishLocal: 'vec3f', // rest pose position (model units)
 	vFishData: 'vec4f', // aData
-	vFishInfo: 'vec4f', // pattern, seed, length (m), 0
+	vFishInfo: 'vec4f', // pattern, seed, length (m), temporal reactivity
 	vFishFlags: 'vec4f', // props: cloudy eye, wet, dried, blood
 	vFishFade: 'vec2f', // level-of-detail cross-fade: share, outgoing
 };
@@ -213,45 +243,25 @@ function swimVertex( batch, fade ) {
 // dried, blood )
 function propVertex( batch, fade ) {
 
+	const previous = batch.motion ? batch.previousRecord( 'ri' ) : null;
 	return /* wgsl */`
 	${ recordOf( batch, fade ) }
 	let d = v.aData;
 	let pattern = floor( r2.x );
-	var p = v.position;
-	var n = v.normal;
-	o.vFishLocal = p;
+	o.vFishLocal = v.position;
 	o.vFishData = d;
-	o.vFishInfo = vec4f( pattern, fract( r2.x ), r0.w, 0.0 );
+	o.vFishInfo = vec4f( pattern, fract( r2.x ), r0.w, select( 0.0, 1.0, ri < ${ batch.reactiveInstances || 0 }u ) );
 	o.vFishFlags = r3;
-
-	// lower jaw: rotates down about the hinge at the corner of the mouth
 	let hinge = fishRow( pattern, 7 ).zw;
-	let a = r2.w * fishJawOf( d );
-	let ca = cos( a ); let sa = sin( a );
-	let dy = p.y - hinge.y; let dz = p.z - hinge.x;
-	p.y = hinge.y + dy * ca - dz * sa;
-	p.z = hinge.x + dy * sa + dz * ca;
-	let ny = n.y * ca - n.z * sa; let nz = n.y * sa + n.z * ca;
-	n.y = ny;
-	n.z = nz;
-
-	// body bent along circular arcs about its middle: sideways (curl), then up / down (sag)
-	let k1 = r2.y + select( -1e-4, 1e-4, r2.y >= 0.0 );
-	let t1 = k1 * p.z;
-	let c1 = cos( t1 ); let s1 = sin( t1 ); let h1 = sin( t1 * 0.5 );
-	let x1 = h1 * h1 * 2.0 / k1 + p.x * c1;
-	let z1 = s1 / k1 - p.x * s1;
-	let nx1 = n.x * c1 + n.z * s1; let nz1 = n.z * c1 - n.x * s1;
-	let k2 = r2.z + select( -1e-4, 1e-4, r2.z >= 0.0 );
-	let t2 = k2 * z1;
-	let c2 = cos( t2 ); let s2 = sin( t2 ); let h2 = sin( t2 * 0.5 );
-	let y2 = h2 * h2 * 2.0 / k2 + p.y * c2;
-	let z2 = s2 / k2 - p.y * s2;
-	let ny2 = n.y * c2 + nz1 * s2; let nz2 = nz1 * c2 - n.y * s2;
+	let posed = fishPropWarp( v.position, v.normal, fishJawOf( d ), r2, hinge );
 	v.useWorld = true;
-	v.worldNormal = fishRotateQ( q, vec3f( nx1, ny2, nz2 ) );
-	v.worldPos = fishRotateQ( q, vec3f( x1, y2, z2 ) * r0.w ) + r0.xyz;
-	v.prevWorldPos = v.worldPos;`;
+	v.worldNormal = fishRotateQ( q, posed.normal );
+	v.worldPos = fishRotateQ( q, posed.position * r0.w ) + r0.xyz;
+	${ previous ? /* wgsl */`
+	// The entire previous pose matters: body bend, jaw, hook position and orientation.
+	let prev0 = ${ previous[ 0 ] }; let prevQ = ${ previous[ 1 ] }; let prev2 = ${ previous[ 2 ] };
+	let prevPose = fishPropWarp( v.position, v.normal, fishJawOf( d ), prev2, hinge );
+	v.prevWorldPos = fishRotateQ( prevQ, prevPose.position * prev0.w ) + prev0.xyz;` : 'v.prevWorldPos = v.worldPos;' }`;
 
 }
 
@@ -743,11 +753,12 @@ export function createSwimMaterial( batch, { fade = false } = {} ) {
 
 }
 
-// Material of the fish props: wet, glossy (clear coat), static.
+// Material of fish props: static by default; animated batches provide previous poses.
 export function createPropMaterial( batch, { fade = false } = {} ) {
 
 	return baseMaterial( batch, fade ? 'FishPropsFade' : 'FishProps', {
 		vertex: propVertex( batch, fade ),
+		output: batch.reactiveInstances ? 'r.mask = vec4f( 0.0, 0.0, in.vs.vFishInfo.w, 1.0 );' : '',
 		surface: PROP_MASK + surface( true, fade ),
 		shadow: PROP_MASK + '\n\treturn true;',
 		defines: { CLEARCOAT: 1 },

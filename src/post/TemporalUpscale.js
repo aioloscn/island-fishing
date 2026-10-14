@@ -30,13 +30,14 @@ const CLR = [ 0, 0, 0, 0 ];
 // Two changes for native resolution, measured against a 16x supersampled reference walking the pier
 // (test/taa-pier.mjs): a wider box while still, and an accumulation cap by the history's resampling
 // blur (see the resolve).
-// FSR2's reactive and transparency masks are not used. The water surface (it moves on its own and its
+// Animated foreground materials use the scene mask's blue channel to reject stale history.
+// The water surface (it moves on its own and its
 // motion vectors only carry the camera's) keeps its history through the disocclusion test.
 // Jitter: FSR2's Halton (2, 3) with 8 x (output / input)^2 phases, driven by the post chain:
 // PostFX.beginFrame() takes jitter() for the frame's camera (setFrameCamera) and endFrame() calls
 // clearViewOffset() to advance it. The history is ping-ponged (the resolve writes the other target).
 // Inputs: beauty (internal res, getter), the scene's reversed-Z depth, velocity (uv motion, current -
-// previous, y down: history uv = uv - velocity), water mask (g = 1 on water surface pixels), the
+// previous, y down: history uv = uv - velocity), scene mask (g = water surface, b = temporal reactivity), the
 // exposure (a storage buffer, times frame.exposure: FSR2's thresholds are in display-referred units).
 
 function halton( index, base ) {
@@ -342,6 +343,8 @@ struct TaauOut { @location( 0 ) color: vec4f, @location( 1 ) lock: vec4f, @locat
 	// the water surface keeps its history (its depth changes with the waves, not with occlusion)
 	let ms = vec2i( textureDimensions( taauMask ) );
 	let isWater = taau.hasWaterMask > 0.5 && textureLoad( taauMask, clamp( closestTap, vec2i( 0 ), ms - 1 ), 0 ).g > 0.5;
+	// Dilate with the same nearest-depth tap as velocity, including thin moving edges.
+	let materialReactive = select( 0.0, textureLoad( taauMask, clamp( closestPositionTexel, vec2i( 0 ), ms - 1 ), 0 ).b, taau.hasWaterMask > 0.5 );
 	let isExistingSample = taauInside( historyUV );
 	let depthClip = select( 0.0, 1.0, isDisocclusion && ! isEdge && ! isWater );
 	let isNewSample = ! isExistingSample || taau.reset > 0.5;
@@ -396,7 +399,7 @@ struct TaauOut { @location( 0 ) color: vec4f, @location( 1 ) lock: vec4f, @locat
 
 	// ---- lock status (FSR2 UpdateLockStatus). The shading change luma is the local mean lock luma
 	// (FSR2 reads a coarse mip of the luma)
-	var thisFrameReactive = temporalReactive;
+	var thisFrameReactive = max( temporalReactive, materialReactive );
 	let shadingLuma = lumaSum / 9.0;
 	if ( lockStatus.y == 0.0 ) { lockStatus.y = shadingLuma; }
 	let luminanceDiff = 1.0 - taauMinDivMax( lockStatus.y, shadingLuma );
@@ -483,6 +486,8 @@ struct TaauOut { @location( 0 ) color: vec4f, @location( 1 ) lock: vec4f, @locat
 		// the last 4 frames'; the jitter brings it back to one of them. Such pixels keep their history.
 		let dAll = min( min( abs( curLuma - lumaHist.x ), abs( curLuma - lumaHist.y ) ), min( abs( curLuma - lumaHist.z ), abs( curLuma - lumaHist.w ) ) );
 		staticKeep = taau.staticKeep * select( 0.0, 1.0, hrVelocity < 0.05 && lumaHist.w != 0.0 && ! isWater ) * sat( 1.0 - ( dAll - 0.01 ) / 0.03 );
+		lumaInstability *= 1.0 - thisFrameReactive;
+		staticKeep *= 1.0 - thisFrameReactive;
 		lumaHist = vec4f( curLuma, lumaHist.xyz );
 	}
 

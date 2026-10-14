@@ -30,7 +30,13 @@ const MB_MAX_TILES_X: i32 = ${ MAX_TILES_X };
 
 // uv motion (current - previous) of the pixel at uv with reversed-Z depth d (sky = 0): sky pixels
 // reproject their far-plane points with last frame's unjittered camera
+fn mbReactive( uv: vec2f ) -> bool {
+	let size = vec2i( textureDimensions( mbReactiveMask ) );
+	let texel = clamp( vec2i( uv * vec2f( size ) ), vec2i( 0 ), size - 1 );
+	return mbParams.hasReactiveMask > 0.5 && textureLoad( mbReactiveMask, texel, 0 ).b > 0.5;
+}
 fn mbUvVelocity( vel: vec4f, uv: vec2f, d: f32 ) -> vec2f {
+	if ( mbReactive( uv ) ) { return vec2f( 0.0 ); }
 	let ndc = ( uv * 2.0 - 1.0 ) * vec2f( 1.0, -1.0 );
 	let prev = mbParams.skyReproj * vec4f( ndc, 0.0, 1.0 );
 	return select( ( ndc - prev.xy / prev.w ) * vec2f( 0.5, -0.5 ), vel.xy, d > 1e-7 );
@@ -46,7 +52,7 @@ fn mbToPx( vel: vec2f ) -> vec2f {
 
 export class MotionBlur {
 
-	constructor( { velocityTexture, depthTexture, color } ) {
+	constructor( { velocityTexture, depthTexture, color, reactiveMaskTexture = null } ) {
 
 		this.uniforms = new UniformBlock( 'MotionBlurParams', {
 			// sky pixels (depth 0): reproject their far-plane points with last frame's unjittered camera
@@ -56,6 +62,7 @@ export class MotionBlur {
 			// fraction of the frame time the shutter is open: 0.5 = 180 degree shutter, 0 = off
 			shutter: [ 'f32', 0.5 ],
 			frameIndex: [ 'f32', 0 ],
+			hasReactiveMask: [ 'f32', reactiveMaskTexture ? 1 : 0 ],
 		}, { label: 'motionBlur' } );
 		const U = this.uniforms.fields;
 		this.shutter = U.shutter;
@@ -69,6 +76,7 @@ export class MotionBlur {
 		this.color = color; // Texture or getter
 		this.velocityTexture = velocityTexture;
 		this.depthTexture = depthTexture;
+		this.reactiveMaskTexture = reactiveMaskTexture || velocityTexture;
 		this.tileMax = new StorageBuffer( { label: 'mbTileMax', count: MAX_TILES_X * MAX_TILES_Y, type: 'vec4f' } );
 		this.neighborMax = new StorageBuffer( { label: 'mbNeighborMax', count: MAX_TILES_X * MAX_TILES_Y, type: 'vec4f' } );
 		this._frame = 0;
@@ -83,6 +91,7 @@ export class MotionBlur {
 			bindings: {
 				mbVelocity: { texture: () => this.velocityTexture },
 				mbDepth: { texture: () => this.depthTexture },
+				mbReactiveMask: { texture: () => this.reactiveMaskTexture },
 				mbColor: { texture: colorTex },
 				mbNeighbor: { storage: this.neighborMax, access: 'read' },
 			},
@@ -94,6 +103,8 @@ fn mbSample( uv: vec2f ) -> vec3f { return textureSampleLevel( mbColor, smpLinea
 // unchanged where nothing moves; the blur itself reads the unsharpened resolved image, so
 // sharpening never acts on blurred pixels.
 fn mbApply( sharpColor: vec3f, uvIn: vec2f ) -> vec3f {
+	// Keep the catch inspection readable, while scenery retains the configured blur.
+	if ( mbReactive( uvIn ) ) { return sharpColor; }
 	var out = sharpColor;
 	if ( mbParams.shutter > 0.0 ) {
 		let pix = uvIn * mbParams.outSize;
@@ -192,6 +203,7 @@ fn mbApply( sharpColor: vec3f, uvIn: vec2f ) -> vec3f {
 				...common,
 				mbVelocity: { texture: () => this.velocityTexture },
 				mbDepth: { texture: () => this.depthTexture },
+				mbReactiveMask: { texture: () => this.reactiveMaskTexture },
 				mbTileMaxRW: { storage: this.tileMax, access: 'read_write' },
 			},
 			workgroupSize: [ WG, WG, 1 ],

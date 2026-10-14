@@ -167,35 +167,57 @@ export function createPropMaterial( name = 'gameProp', extra = {} ) {
 
 // Fishing line: a thin ribbon laid along a sagging curve between two world points, built in the
 // vertex shader from ( t along the line, side ) so it costs one draw and no uploads per frame.
+const lineModule = new ShaderModule( {
+	name: 'fishingLine',
+	code: /* wgsl */`
+fn fishingLinePoint( t: f32, side: f32, a: vec3f, b: vec3f, c: vec3f, cameraPos: vec3f, viewProj: mat4x4f, show: f32 ) -> vec3f {
+	let P = ( 1.0 - t ) * ( 1.0 - t ) * a + 2.0 * ( 1.0 - t ) * t * c + t * t * b;
+	let T = normalize( 2.0 * ( 1.0 - t ) * ( c - a ) + 2.0 * t * ( b - c ) + vec3f( 1e-6, 0.0, 0.0 ) );
+	let toCam = cameraPos - P;
+	let W = normalize( cross( T, toCam ) + vec3f( 0.0, 1e-6, 0.0 ) );
+	// Without temporal locks, a ribbon narrower than an input pixel can vanish
+	// between jittered samples, especially at 50% render scale. Keep a small
+	// raster footprint rather than recovering visibility from stale line images.
+	let clipW = abs( ( viewProj * vec4f( P, 1.0 ) ).w );
+	let pixelWidth = clipW * 1.2 * frame.invResolution.y / max( abs( frame.proj[ 1 ][ 1 ] ), 1e-6 );
+	let w = max( max( 0.0006, length( toCam ) * 0.0006 ), pixelWidth ) * show;
+	return P + W * side * w;
+}
+`,
+} );
+
 export function createLineMaterial( segments ) {
 
 	const m = standard( {
 		color: 0xd8dde0,
 		roughness: 0.35,
 		side: 'double',
+		modules: [ lineModule ],
 		uniforms: {
 			lineA: [ 'vec3f', new Vector3() ],
 			lineB: [ 'vec3f', new Vector3() ],
 			lineCtl: [ 'vec3f', new Vector3() ], // middle control point (sag / belly), quadratic Bezier
 			lineShow: [ 'f32', 0 ],
+			prevLineA: [ 'vec3f', new Vector3() ],
+			prevLineB: [ 'vec3f', new Vector3() ],
+			prevLineCtl: [ 'vec3f', new Vector3() ],
+			prevLineShow: [ 'f32', 0 ], // zero after being hidden: no motion from an old cast
 		},
 		attributes: { aLine: 'vec2f' },
 		vertex: /* wgsl */`
 	let t = v.aLine.x;
 	let side = v.aLine.y;
-	let a = mat.lineA; let b = mat.lineB; let c = mat.lineCtl;
-	let P = ( 1.0 - t ) * ( 1.0 - t ) * a + 2.0 * ( 1.0 - t ) * t * c + t * t * b;
-	let T = normalize( 2.0 * ( 1.0 - t ) * ( c - a ) + 2.0 * t * ( b - c ) + vec3f( 1e-6, 0.0, 0.0 ) );
-	let toCam = frame.cameraPos - P;
-	let dist = length( toCam );
-	let W = normalize( cross( T, toCam ) + vec3f( 0.0, 1e-6, 0.0 ) );
-	// about a pixel wide at any distance (TAA resolves the sub-pixel coverage)
-	let w = max( 0.0006, dist * 0.0006 ) * mat.lineShow;
 	v.useWorld = true;
-	v.worldPos = P + W * side * w;
+	v.worldPos = fishingLinePoint( t, side, mat.lineA, mat.lineB, mat.lineCtl, frame.cameraPos, frame.viewProjNoJitter, mat.lineShow );
 	v.prevWorldPos = v.worldPos;
-	v.worldNormal = normalize( toCam );
+	if ( mat.prevLineShow > 0.0 ) {
+		v.prevWorldPos = fishingLinePoint( t, side, mat.prevLineA, mat.prevLineB, mat.prevLineCtl, frame.prevCameraPos, frame.prevViewProjNoJitter, mat.prevLineShow );
+	}
+	v.worldNormal = normalize( frame.cameraPos - v.worldPos );
 `,
+		// Moving sub-pixel ribbons must not inherit the thin-feature history locks.
+		// Alpha 1 is needed because the scene mask attachment uses normal blending.
+		output: 'r.mask = vec4f( 0.0, 0.0, 1.0, 1.0 );',
 	} );
 	m.name = 'fishingLine';
 	m.receiveShadows = true;

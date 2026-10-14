@@ -23,8 +23,8 @@
 	--tw-line: rgba(170, 215, 235, 0.12);
 	--tw-line-2: rgba(170, 215, 235, 0.2);
 
-	--tw-font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-	--tw-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+	--tw-font: 'Inter', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--tw-mono: 'JetBrains Mono', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
 	--tw-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 	--tw-ease-io: cubic-bezier(0.65, 0, 0.35, 1);
@@ -143,23 +143,13 @@ body {
 	container-type: inline-size;
 }
 
-.loader-kicker {
-	margin: 0 0 calc(10 * var(--tw-u));
-	font-size: clamp(10px, 1vw, 13px);
-	font-weight: 600;
-	letter-spacing: 0.34em;
-	text-transform: uppercase;
-	color: var(--tw-sun);
-	text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
-}
-
 .loader-title {
-	margin: 0 -0.3em 0 -0.04em; /* optical: the trailing tracking and the T's side bearing */
-	/* always fits its column: 9 letters at 0.3em tracking are ~9.2em wide, trailing tracking included */
+	margin: 0 -0.12em 0 -0.04em;
+	/* Keep the four-character game name on one line at narrow widths. */
 	font-size: min(136px, 10.4cqi);
 	white-space: nowrap;
 	font-weight: 600;
-	letter-spacing: 0.3em;
+	letter-spacing: 0.12em;
 	line-height: 0.95;
 	color: transparent;
 	background: linear-gradient(180deg, #ffffff 20%, #fff0dc 70%, #ffd7a8 100%);
@@ -372,8 +362,8 @@ body {
 	}
 
 	.loader-title {
-		letter-spacing: 0.22em;
-		margin-right: -0.22em;
+		letter-spacing: 0.12em;
+		margin-right: -0.12em;
 		font-size: min(136px, 11.2cqi);
 	}
 
@@ -538,6 +528,7 @@ body {
 /* Idle dimming is applied per element: an ancestor with opacity < 1 would
    become a backdrop root and flatten the glass blur of its children. */
 .tw-stats,
+.tw-game-time,
 .tw-mark,
 .tw-brand-name,
 .tw-mode {
@@ -545,10 +536,17 @@ body {
 }
 
 .tw-root.is-idle .tw-stats,
+.tw-root.is-idle .tw-game-time,
 .tw-root.is-idle .tw-mark,
 .tw-root.is-idle .tw-brand-name,
 .tw-root.is-idle .tw-mode {
 	opacity: 0.5;
+}
+
+.tw-stats-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--tw-3);
 }
 
 .tw-stats {
@@ -577,7 +575,8 @@ body {
 	gap: calc(5 * var(--tw-u));
 }
 
-.tw-fps {
+.tw-fps,
+.tw-game-time {
 	min-width: 2.4ch;
 	font-family: var(--tw-mono);
 	font-size: calc(21 * var(--tw-u));
@@ -588,6 +587,11 @@ body {
 	text-align: right;
 	color: var(--tw-level);
 	transition: color var(--tw-slow);
+}
+
+.tw-game-time {
+	min-width: 5ch;
+	color: var(--tw-aqua);
 }
 
 .tw-fps-unit {
@@ -1318,7 +1322,7 @@ body {
 }
 
 .tw-page:empty::before {
-	content: 'No settings in this section yet.';
+	content: '此分类暂无设置。';
 	display: block;
 	padding: var(--tw-6) var(--tw-4);
 	font-size: var(--tw-fs-sm);
@@ -1431,10 +1435,6 @@ body {
 	border-radius: 2px;
 	background: var(--tw-aqua);
 	box-shadow: 0 0 8px rgba(var(--tw-aqua-rgb), 0.9);
-}
-
-.tw-rail-open {
-	color: var(--tw-ink);
 }
 
 .tw-rail-sep {
@@ -2463,10 +2463,10 @@ body {
 }
 
 .tw-start-title {
-	margin-right: -0.42em;
+	margin-right: -0.12em;
 	font-size: clamp(30px, 4.6vw, 64px);
 	font-weight: 600;
-	letter-spacing: 0.42em;
+	letter-spacing: 0.12em;
 	line-height: 1.05;
 	text-shadow: 0 2px 30px rgba(0, 0, 0, 0.5);
 }
@@ -2608,3 +2608,6 @@ body {
 	}
 
 }
+.tw-save-notice { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10000; max-width: calc(100vw - 32px); padding: 12px 16px; border-radius: 10px; background: #412b17; color: #fff2da; font: 14px/1.5 sans-serif; }
+.tw-save-notice[hidden] { display: none; }
+.tw-save-notice button { margin-left: 12px; padding: 4px 10px; cursor: pointer; }

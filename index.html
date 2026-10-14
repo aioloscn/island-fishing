@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<title>Tidewater</title>
+	<title>海岛钓鱼 · Tidewater</title>
 	<link rel="preload" as="image" href="ui/keyart-720.jpg" imagesrcset="ui/keyart-720.jpg 1280w, ui/keyart.jpg 2560w" imagesizes="100vw" />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,33 +20,32 @@
 <body>
 	<div id="app"></div>
 	<div id="fps">-- fps</div>
-	<div id="loader" role="status" aria-live="polite" aria-label="Loading Tidewater">
+	<div id="loader" role="status" aria-live="polite" aria-label="正在加载海岛钓鱼">
 		<img class="loader-art" src="ui/keyart-720.jpg" srcset="ui/keyart-720.jpg 1280w, ui/keyart.jpg 2560w" sizes="100vw" alt="" decoding="async" fetchpriority="high" onload="this.classList.add('is-in')" />
 		<div class="loader-scrim"></div>
 		<div class="loader-inner">
 			<div class="loader-brand">
-				<p class="loader-kicker">An island fishing game</p>
-				<h1 class="loader-title">TIDEWATER</h1>
-				<p class="loader-tagline">Take the boat out, work the reef and the deep water, and sell your catch to Joe before dark.</p>
+				<h1 class="loader-title">海岛钓鱼</h1>
+				<p class="loader-tagline">驾船出海，探索珊瑚礁与深水区，天黑前把鱼获卖给乔。</p>
 			</div>
 			<div class="loader-panel">
 				<div class="loader-row">
-					<span class="loader-status">Starting…</span>
+					<span class="loader-status">正在启动…</span>
 					<span class="loader-meta"><span class="loader-pct">0%</span><span class="loader-time">0:00</span></span>
 				</div>
 				<div class="loader-bar"><div class="loader-fill"></div><div class="loader-glint"></div></div>
-				<div class="loader-note">The first launch compiles the shaders and can take a minute or two. Later visits load much faster.</div>
+				<div class="loader-note">首次启动需要编译着色器，可能耗时一两分钟。后续访问会快得多。</div>
 				<div class="loader-tips">
-					<span class="loader-tip-label">Tip</span>
+					<span class="loader-tip-label">提示</span>
 					<div class="loader-tip-list">
-						<p class="loader-tip">Press <kbd>R</kbd> for the rod. Hold the left mouse button to wind up, release to cast: the longer you hold, the farther it goes.</p>
-						<p class="loader-tip">Watch the bobber. A few nibbles, then it's pulled under: click the left mouse button that moment to set the hook.</p>
-						<p class="loader-tip">In a fight, hold to reel but keep the line tension in the green. Ease off when the fish runs, or the line snaps.</p>
-						<p class="loader-tip">What bites depends on where you fish: the shallows, the reef, the deep water past the drop-off, and the time of day.</p>
-						<p class="loader-tip">Joe at the fish stand by the pier buys your catch. Fish are worth more by weight, so bring the big ones in.</p>
-						<p class="loader-tip">Marta at the boathouse sells upgrades: stronger line, a faster reel, a bigger hold, more fuel and a fish finder.</p>
-						<p class="loader-tip">Press <kbd>E</kbd> at the boat to board, at the wheel to take the helm, and again to step away and walk the deck.</p>
-						<p class="loader-tip">Press <kbd>I</kbd> for your cooler and the fish log. Deck lights from Marta let you fish after dark.</p>
+						<p class="loader-tip">按 <kbd>R</kbd> 拿出鱼竿。按住左键蓄力，松开抛竿：蓄力越久，抛得越远。</p>
+						<p class="loader-tip">观察浮漂。鱼会先试探几次，然后把浮漂拉入水下：就在那一刻点击左键扬竿。</p>
+						<p class="loader-tip">遛鱼时按住收线，让张力保持在绿色区间。鱼猛冲时松手，否则鱼线会断。</p>
+						<p class="loader-tip">咬钩鱼种取决于钓点和时段：浅滩、珊瑚礁，或海底陡坡外的深水区。</p>
+						<p class="loader-tip">码头旁鱼摊的乔会收购鱼获。鱼越重越值钱，争取把大鱼钓上来。</p>
+						<p class="loader-tip">船屋旁的玛尔塔出售升级：更强的鱼线、更快的卷线器、更大的鱼舱、燃油和探鱼器。</p>
+						<p class="loader-tip">在船旁按 <kbd>E</kbd> 登船，在船舵旁掌舵，再按一次离开驾驶位，在甲板上走动。</p>
+						<p class="loader-tip">按 <kbd>I</kbd> 打开海钓箱，点击「图鉴」查看历史鱼获。向玛尔塔购买甲板灯后，就能夜钓了。</p>
 					</div>
 				</div>
 			</div>

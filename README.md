@@ -1,155 +1,172 @@
-# Tidewater
+# Tidewater（海岛钓鱼）
 
-An island fishing game for the browser. Cast from the pier, the beach or your own boat, fight the fish,
-sell your catch to Joe at the fish stand, and spend it on better gear at Marta's chandlery. Around it is a
-real-time tropical island and ocean: swim the reef, drive the boat out to deep water, and watch a humpback
-breach. It runs directly on WebGPU and WGSL with its own small rendering engine, no framework.
+一款在浏览器中游玩的海岛钓鱼游戏。你可以从码头、沙滩或自己的船上抛竿，与上钩的鱼较量，
+把鱼获卖给鱼摊的乔，再到玛尔塔的船具店购买更好的装备。周围是实时渲染的热带海岛和海洋：
+潜游珊瑚礁、驾船驶向深水区，或欣赏座头鲸跃出水面。游戏直接使用 WebGPU 和 WGSL，
+采用自有的小型渲染引擎，不依赖框架。
 
-**Play it:** https://dgreenheck.github.io/tidewater/
+**原版在线游玩：** https://dgreenheck.github.io/tidewater/ 。本工作区使用项目文件存档，需要按下方说明启动本地服务。
 
-![Fishing off the pier at golden hour](docs/screenshot.jpg)
+![夕阳下在码头钓鱼](docs/screenshot.jpg)
 
-![The beach in the late afternoon](docs/screenshot-beach.jpg)
+![午后晚些时候的沙滩](docs/screenshot-beach.jpg)
 
-## Requirements
+## 运行要求
 
-- A browser with WebGPU: a recent Chrome, Edge or Safari.
-- A capable GPU. It targets 60 fps at 2560×1267 on an Apple M5 Pro, and dynamic resolution scales
-  the render down on slower machines.
-- The first load compiles several hundred shaders, which can take a minute or more. Later visits are
-  faster because the browser caches them.
+- 支持 WebGPU 的浏览器，例如较新版本的 Chrome、Edge 或 Safari。
+- 性能足够的 GPU。项目以 Apple M5 Pro 上 2560×1267 分辨率、60 帧/秒为目标；
+  较慢的设备会通过动态分辨率降低内部渲染尺寸。
+- 首次加载需要编译数百个着色器，可能耗时一分钟以上。后续访问会利用浏览器缓存，加载更快。
 
-## Features
+## 游戏与渲染特性
 
-**Fishing**
-- A spinning rod and reel that cast, reel and bend under load, with the bail, rotor and crank animated.
-- Bites that depend on the water (shallows, pier, reef, bay, deep water), depth and time of day, across
-  18 Caribbean species.
-- A line-tension fight: keep the tension in the green band, ease off when the fish runs.
-- A full-screen catch card with the fish's length and weight, a fish log with records, and a cooler.
-- Joe's fish stand buys your catch; Marta's chandlery sells line, reels, rods, a bigger hold, fuel, a rebuilt
-  engine, a fish finder and deck floodlights for night fishing.
-- Walk the deck and the wheelhouse while the boat drifts; the boat burns fuel.
-- A first-play guide, contextual tips and a minimap. Progress is saved in the browser.
+**钓鱼**
 
-**Ocean**
-- Four-cascade FFT ocean (Tessendorf spectra) with foam, whitecaps, wind streaks and swell.
-- Depth-aware breaking waves with peeling shoulders, whitewater, spray and foam lace.
-- A shallow-water simulation for swash running up and down the sand.
-- Boat wake and bow spray, and a whale wake.
-- Caustics on the seabed and in the water, with light shafts.
-- A split underwater/above-water view at the waterline, with water droplets on the lens after surfacing.
-- Refraction of the seabed through the surface, including behind the pier and boats.
+- 纺车式鱼竿和卷线器，支持抛竿、收线和受力弯曲，带有导线环、转子和摇柄动画。
+- 鱼是否咬钩取决于水域（浅滩、码头、珊瑚礁、海湾、深水区）、水深和时段，共有 18 种加勒比海鱼类。
+- 通过鱼线张力控制遛鱼：让张力保持在绿色区间，鱼猛冲时松开收线。
+- 钓起的鱼挂在鱼线上挣扎，透明信息层在上方展示鱼名、下方展示长度、重量、价值和纪录；点击鼠标或按 E 收起鱼获。海钓箱内的「图鉴」按钮打开独立的大弹窗：已捕获的鱼展示图片、累计数量、最重和最长纪录（出售或放生后仍保留）；未捕获的鱼显示灰色轮廓和「？？？」名称。
+- 新鱼导致海钓箱／鱼舱超重时，自动打开海钓箱，列表中包含本次鱼获，并显示合计重量和当前装备的容量上限；超重总重量标红。放生任意鱼获会立即刷新合计重量，直到低于上限才显示关闭按钮；I／Tab／Esc 也不能在超重时关闭。关闭会保留列表中的鱼，不会默认放生本次鱼获。处理进度随项目存档保存，刷新后可继续处理，图鉴只记录一次。
+- 乔的鱼摊收购鱼获；玛尔塔的船具店出售鱼线、卷线器、鱼竿、更大的鱼舱、燃油、翻新引擎、
+  探鱼器和夜钓用甲板泛光灯。
+- 船漂流时可以在甲板和驾驶舱内行走；驾驶船只会消耗燃油。
+- 提供首次游玩教程、情境提示和小地图。进度保存在项目的 `data/game-save.json` 中，不同浏览器共用同一份存档。
 
-**Sky**
-- Physically based atmosphere (Hillaire 2020) with a sun, moon and stars.
-- Volumetric cumulus and wispy cirrus with cloud shadows on the land.
-- Aerial perspective and sea haze.
-- God rays, and a lens flare with occlusion.
+**海洋**
 
-**World**
-- An island with a beach, hills, headlands and rocks.
-- A fishing village, a pier, and the vendors' stalls built from Poly Haven scans.
-- Realistic vendor characters (Microsoft Rocketbox) with skinned animation.
-- A coral reef with fish.
-- Palms, bananas, monstera, elephant ear, heliconia, bird of paradise, broadleaf trees, shrubs and dune
-  grass, with impostors and dithered LOD fades.
-- Beach debris.
-- Birds, crabs and marine snow.
-- A humpback whale with an escort of fish, blows, fluke dives and breaches.
+- 四级级联 FFT 海洋（Tessendorf 波谱），包含泡沫、白浪、风痕和涌浪。
+- 根据水深模拟破碎浪，包含逐渐展开的浪肩、白色浪花、飞溅和蕾丝状泡沫。
+- 浅水模拟表现海水在沙滩上的上冲与回流。
+- 船尾迹、船首飞溅和鲸鱼尾迹。
+- 海底与水中的焦散和光柱。
+- 水线处同时展示水下与水上视野，浮出水面后镜头留有水滴。
+- 透过水面折射海底，包括码头和船只后方的区域。
 
-**Lighting and post**
-- Cascaded shadows with contact-hardening penumbrae, and screen-space contact shadows.
-- Ground bounce light.
-- GTAO ambient occlusion.
-- Temporal upscaling and sharpening.
-- Bloom, auto exposure and motion blur.
-- Night lighting from lanterns, windows and the boat, plus a flashlight that also works underwater.
+**天空**
 
-**Audio**
-- Positional audio from real CC0 field recordings: surf timed to each breaking wave, wind, birds, the boat
-  engine, footsteps by surface, underwater ambience, whale song, and the rod and reel (casts, the bail,
-  reeling, the drag, line snaps, splashes).
+- 基于物理的大气模型（Hillaire 2020），包含太阳、月亮和星空。
+- 体积积云、纤薄卷云，以及投射到陆地上的云影。
+- 空气透视和海雾。
+- 体积光束及带遮挡计算的镜头光晕。
 
-## Controls
+**世界**
 
-| Key | Action |
+- 包含沙滩、山丘、岬角和岩石的海岛。
+- 渔村、码头，以及由 Poly Haven 扫描资产搭建的商贩摊位。
+- 带骨骼动画的写实商贩角色（Microsoft Rocketbox）。
+- 珊瑚礁和游鱼。
+- 棕榈、香蕉、龟背竹、海芋、蝎尾蕉、鹤望兰、阔叶树、灌木和沙丘草，
+  使用替身渲染与抖动式 LOD 淡入淡出。
+- 海滩漂流物。
+- 鸟类、螃蟹和海洋雪。
+- 座头鲸及伴游鱼群，包含喷气、甩尾下潜和跃出水面的动作。
+
+**光照与后期处理**
+
+- 级联阴影、接触硬化半影和屏幕空间接触阴影。
+- 地面反弹光。
+- GTAO 环境光遮蔽。
+- 时域上采样和锐化。
+- 泛光、自动曝光和运动模糊。
+- 来自灯笼、窗户和船只的夜间照明，以及可以在水下使用的手电筒。
+
+**音频**
+
+- 使用真实 CC0 实地录音的空间音频：与破碎浪同步的海浪声、风声、鸟鸣、船引擎声、
+  不同地面的脚步声、水下环境声、鲸歌，以及鱼竿与卷线器音效（抛竿、导线环、收线、泄力、断线和飞溅）。
+
+## 操作
+
+| 按键 | 功能 |
 |---|---|
-| W A S D | Move |
-| Mouse | Look (click to capture the mouse, Esc to release) |
-| Shift | Sprint / boat boost |
-| Space | Jump / swim up |
-| C | Crouch / dive |
-| E | Interact: board the boat, take or leave the helm, step ashore, trade with the fish buyer or the chandlery |
-| V | Boat camera at the helm (1st / 3rd person) |
-| R | Take out / put away the fishing rod |
-| Left mouse | Hold to wind up, release to cast · strike when a fish takes the bait · hold to reel |
-| Right mouse | Reel an empty line in |
-| I or Tab | Cooler / fish hold and the fish log |
-| F | Free camera |
-| L | Flashlight |
-| T | Pause time |
-| M | Mute |
-| H | Settings panel |
-| P | Photo mode |
-| F1 or ? | All controls |
+| W A S D | 移动 |
+| 鼠标 | 转动视角（点击画面锁定鼠标，Esc 释放） |
+| Shift | 冲刺／船只加速 |
+| 空格 | 跳跃／向上游 |
+| C | 蹲下／下潜 |
+| E | 交互：登船、掌舵或离开驾驶位、上岸、与鱼商或船具店交易 |
+| V | 掌舵时切换船只视角（第一／第三人称） |
+| R | 拿出／收起鱼竿 |
+| 鼠标左键 | 按住蓄力、松开抛竿；鱼咬钩时扬竿；按住收线 |
+| 鼠标右键 | 收回空线 |
+| I 或 Tab | 打开／关闭海钓箱或鱼舱，底部「图鉴」按钮查看历史鱼获 |
+| F | 自由视角 |
+| L | 手电筒 |
+| T | 暂停时间 |
+| M | 静音 |
+| H | 设置面板 |
+| P | 拍照模式 |
+| F1 或 ? | 全部操作说明 |
 
-### Fishing
+### 钓鱼玩法
 
-Walk the deck of the boat while it drifts, or fish from the pier and the beach. Cast, wait for the bobber
-to dip and strike when it's pulled under, then play the fish: keep the line tension in the green band,
-ease off when it runs. Different water holds different fish (the shallows, the pier, the reef, the bay and
-deep water offshore), and some bite best at dawn, dusk or night. Sell your catch to Joe at the fish stand
-on the beach by the pier, and spend it at Marta's chandlery by the boathouse: stronger line, a faster reel,
-a longer rod, a bigger fish hold, a larger fuel tank, a rebuilt engine, a fish finder and deck floodlights for
-night fishing. The boat burns diesel at the helm; fill up at the chandlery. Progress is saved in the browser.
+你可以在漂流的船上走动，也可以从码头和沙滩钓鱼。抛竿后等待浮漂下沉，在浮漂被拉入水下的
+瞬间扬竿，然后遛鱼：让鱼线张力保持在绿色区间，鱼猛冲时松开收线。不同水域有不同鱼类
+（浅滩、码头、珊瑚礁、海湾和近海深水区），有些鱼在黎明、黄昏或夜间更容易咬钩。
+把鱼获卖给码头旁沙滩鱼摊的乔，再到船屋旁玛尔塔的船具店购买更强的鱼线、更快的卷线器、
+更长的鱼竿、更大的鱼舱和油箱、翻新引擎、探鱼器，以及夜钓用甲板泛光灯。
+掌舵时船只会消耗柴油，可在船具店加油。游戏进度由本地服务保存到项目文件中。
 
-The settings panel (H) exposes the sea state, time of day, sun azimuth, clouds, haze, post-processing and
-more.
+设置面板（H）可调整海况、时段、太阳方位角、云层、雾霭、后期处理等参数。最右侧的第七个「常规」标签提供总音量滑块（0–100%）和静音开关，调整后即时生效；M 键也可切换静音。
 
-## URL options
+## URL 参数
 
-Add these to the URL, for example `?fly&noAudio`:
+在地址末尾添加参数，例如 `?fly&noAudio`：
 
-| Option | Effect |
+| 参数 | 效果 |
 |---|---|
-| `fly` | Start in the free camera |
-| `noAudio` | Disable sound |
-| `noClouds` | Skip the volumetric clouds |
-| `noHaze` | Skip the haze and sun shafts |
-| `noCaustics` | Skip caustics |
-| `noVeg` | Skip vegetation |
-| `noSim` | Skip the swash (shallow-water) simulation |
+| `fly` | 以自由视角开始 |
+| `noAudio` | 关闭声音 |
+| `noClouds` | 跳过体积云 |
+| `noHaze` | 跳过雾霭和阳光光柱 |
+| `noCaustics` | 跳过焦散 |
+| `noVeg` | 跳过植被 |
+| `noSim` | 跳过海滩上冲流（浅水）模拟 |
 
-## Running locally
+## 本地运行
 
 ```sh
 npm install
 npm run dev      # http://127.0.0.1:5189
-npm run build    # static build in dist/
+npm run build    # 静态构建输出到 dist/
+npm run preview  # 用本地服务游玩构建版本，同样读写项目存档
 ```
 
-Every push to `main` deploys to GitHub Pages through `.github/workflows/deploy.yml`.
+金币、鱼获、图鉴纪录、装备、燃油和教程进度保存在项目根目录的 `data/game-save.json`。
+第一次启动没有文件时创建新存档，不读取或迁移浏览器旧存档。换用其他浏览器、清理浏览器数据或
+重启服务后，仍会读取同一个项目文件。出售、捕获、购买等变更自动保存，驾驶时每 10 秒保存燃油，
+隐藏或关闭页面时也会尝试保存。备份游戏进度只需复制该文件；`data/` 不提交到 Git。
 
-## Project layout
+建议一次只在一个窗口游玩。若其他窗口已更新存档，本窗口会显示冲突提示并拒绝覆盖，需刷新后
+读取最新进度；服务不可用时显示未保存提示，可在恢复服务后点击「重试保存」。存档损坏或读取失败
+会阻止游戏启动，避免意外覆盖原文件。关闭浏览器前应先处理未保存提示。
 
-| Folder | Contents |
+开发服务和预览服务都提供 `/api/game-save`，请只运行其中一个服务访问同一份存档。
+`npm run build` 只生成前端资源，直接双击 HTML 或部署到 GitHub Pages 等静态托管无法写入项目文件，
+需要使用 `npm run dev` 或 `npm run preview` 游玩。本地服务只监听回环地址。
+
+## 项目结构
+
+| 目录 | 内容 |
 |---|---|
-| `src/game/` | The fishing game: rod, bites, the fight, catch card, cooler and log, vendors and stalls, guide, minimap, HUD |
-| `src/engine/` | The rendering engine: math, scene graph and geometry, GPU resources, WGSL shader composition, materials, lighting and shadows |
-| `src/ocean/` | FFT ocean, water surface and material, shore waves, breakers, swash, wake, caustics, underwater lighting |
-| `src/sky/` | Atmosphere, clouds, sky and environment |
-| `src/world/` | Terrain, village, pier, reef, fish, vegetation, rocks, debris, wildlife, whale, boat |
-| `src/post/` | Post chain: AO, underwater composite, haze, TAAU, motion blur, bloom, lens flare, droplets |
-| `src/materials/` | Shared lighting: shadow filtering, bounce light, contact shadows, local lights, LOD fades |
-| `src/player/` | Walking, swimming, the boat and the free camera |
-| `src/audio/` | The sample-based soundscape |
-| `src/ui/` | Settings panel, loading screen and HUD |
-| `tools/` | Scripts that fetch and convert the characters, stall props and fishing sounds |
-| `test/` | Headless engine smoke test and game-logic tests (`npm test`), and HUD / loader dev pages |
+| `src/game/` | 钓鱼玩法：鱼竿、咬钩、遛鱼、鱼获卡、海钓箱与图鉴、商贩与摊位、教程、小地图、HUD |
+| `data/` | 本机共享游戏存档（自动创建，不提交到 Git） |
+| `tools/project-save.mjs` | 开发／预览服务的存档接口、版本冲突检查与文件原子替换 |
+| `src/engine/` | 渲染引擎：数学、场景图与几何体、GPU 资源、WGSL 着色器组合、材质、光照和阴影 |
+| `src/ocean/` | FFT 海洋、水面与材质、近岸浪、破碎浪、上冲流、尾迹、焦散和水下光照 |
+| `src/sky/` | 大气、云层、天空和环境 |
+| `src/world/` | 地形、渔村、码头、珊瑚礁、鱼群、植被、岩石、漂流物、野生动物、鲸鱼和船只 |
+| `src/post/` | 后期处理链：AO、水下合成、雾霭、TAAU、运动模糊、泛光、镜头光晕和水滴 |
+| `src/materials/` | 共享光照：阴影过滤、反弹光、接触阴影、局部光源和 LOD 淡入淡出 |
+| `src/player/` | 步行、游泳、船只与自由视角 |
+| `src/audio/` | 基于采样的环境音系统 |
+| `src/ui/` | 设置面板、加载画面和 HUD |
+| `tools/` | 下载和转换角色、摊位道具与钓鱼音效的脚本 |
+| `test/` | 无界面引擎冒烟测试、游戏逻辑测试（`npm test`），以及 HUD／加载页开发页面 |
 
-## Credits and license
+## 致谢与许可证
 
-The code is released under the MIT license; see [LICENSE](LICENSE). Third-party assets (CC0 audio from
-Freesound, CC0 scans from Poly Haven, MIT characters from Microsoft Rocketbox, OFL / Apache fonts) and
-technique references are listed in [CREDITS.md](CREDITS.md).
+代码以 MIT 许可证发布，见 [LICENSE](LICENSE)。第三方资产（Freesound 的 CC0 音频、
+Poly Haven 的 CC0 扫描模型、Microsoft Rocketbox 的 MIT 角色、OFL／Apache 字体）
+及技术参考资料列在 [CREDITS.md](CREDITS.md) 中。说明文档和游戏界面使用简体中文；
+第三方资产原名、拉丁学名、技术标识及许可证原文保留，便于溯源。

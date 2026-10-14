@@ -366,14 +366,16 @@ const POSE = {
 	flat: new THREE.Matrix4().makeBasis( new THREE.Vector3( 0, 0, - 1 ), new THREE.Vector3( 0, 1, 0 ), new THREE.Vector3( 1, 0, 0 ) ),
 };
 
-export { iceGeometry, leafGeometry, lobsterGeometry };
+export { iceGeometry, leafGeometry, lobsterGeometry, bendPoint };
 
 export class FishProps {
 
-	constructor() {
+	constructor( { motion = false, reactiveInstances = 0 } = {} ) {
 
 		this.items = [];
 		this.mesh = null;
+		this.motion = motion;
+		this.reactiveInstances = reactiveInstances;
 
 	}
 
@@ -464,7 +466,8 @@ export class FishProps {
 		}
 
 		const n = this.items.length;
-		const batch = new ReefBatch( 'FishProps', kinds, { maxInstances: Math.max( 1, n ), fade: true } );
+		const batch = new ReefBatch( 'FishProps', kinds, { maxInstances: Math.max( 1, n ), fade: true, motion: this.motion } );
+		batch.reactiveInstances = this.reactiveInstances;
 		const D = batch.data;
 		this.kind0 = new Uint16Array( n );
 		this.pos = new Float32Array( n * 4 );
